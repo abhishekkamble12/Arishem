@@ -11,16 +11,66 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      fail-fast: false          # let other matrix jobs finish even if one fails
+      fail-fast: false
       matrix:
         python-version: ["3.12"]
+
+    # All env vars are set at the job level so every step can see them.
+    # The .env file creation is a fallback — CI uses these env vars directly.
+    env:
+      DJANGO_SETTINGS_MODULE: backend.settings
+      SECRET_KEY: "ci-test-secret-key-not-used-in-production"
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1"
+      DB_ENGINE: "django.db.backends.sqlite3"
+      DB_NAME: ":memory:"
+      DB_USER: ""
+      DB_PASSWORD: ""
+      DB_HOST: ""
+      DB_PORT: ""
+      QDRANT_URL: "http://localhost:6333"
+      QDRANT_API_KEY: "ci-dummy"
+      QDRANT_COLLECTION: "documents"
+      AWS_ACCESS_KEY_ID: "ci-dummy"
+      AWS_SECRET_ACCESS_KEY: "ci-dummy"
+      AWS_REGION: "us-east-1"
+      S3_BUCKET: "ci-dummy"
+      TRANSCRIBE_OUTPUT_BUCKET: "ci-dummy"
+      BEDROCK_MODEL_ID: "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      RAG_TOP_K: "5"
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Create .env file
+        # Write the ENV_FILE secret if it exists, otherwise write the CI defaults.
+        # This means CI works even before the secret is configured in GitHub.
         run: |
-          echo "${{ secrets.ENV_FILE }}" > backend/backend/.env
+          if [ -n "${{ secrets.ENV_FILE }}" ]; then
+            echo "${{ secrets.ENV_FILE }}" > backend/backend/.env
+          else
+            cat <<'EOF' > backend/backend/.env
+          SECRET_KEY=ci-test-secret-key-not-used-in-production
+          DEBUG=True
+          ALLOWED_HOSTS=localhost,127.0.0.1
+          DB_ENGINE=django.db.backends.sqlite3
+          DB_NAME=:memory:
+          DB_USER=
+          DB_PASSWORD=
+          DB_HOST=
+          DB_PORT=
+          QDRANT_URL=http://localhost:6333
+          QDRANT_API_KEY=ci-dummy
+          QDRANT_COLLECTION=documents
+          AWS_ACCESS_KEY_ID=ci-dummy
+          AWS_SECRET_ACCESS_KEY=ci-dummy
+          AWS_REGION=us-east-1
+          S3_BUCKET=ci-dummy
+          TRANSCRIBE_OUTPUT_BUCKET=ci-dummy
+          BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+          RAG_TOP_K=5
+          EOF
+          fi
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -42,31 +92,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Check Django configuration
+        working-directory: backend
+        run: |
+          python manage.py check --deploy 2>&1 || true
+          python manage.py check
+
+      - name: Run migrations (SQLite in-memory)
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+
       - name: Run Tests
         working-directory: backend
-        env:
-          # Django
-          SECRET_KEY: "ci-test-secret-key-not-used-in-production"
-          DEBUG: "True"
-          ALLOWED_HOSTS: "localhost,127.0.0.1"
-          # Database — use SQLite for CI so no RDS needed
-          DB_ENGINE: "django.db.backends.sqlite3"
-          DB_NAME: ":memory:"
-          DB_USER: ""
-          DB_PASSWORD: ""
-          DB_HOST: ""
-          DB_PORT: ""
-          # Qdrant — dummy values, tests don't hit the real cluster
-          QDRANT_URL: "http://localhost:6333"
-          QDRANT_API_KEY: "ci-dummy"
-          QDRANT_COLLECTION: "documents"
-          # AWS — dummy values, tests don't call real AWS
-          AWS_ACCESS_KEY_ID: "ci-dummy"
-          AWS_SECRET_ACCESS_KEY: "ci-dummy"
-          AWS_REGION: "us-east-1"
-          S3_BUCKET: "ci-dummy"
-          TRANSCRIBE_OUTPUT_BUCKET: "ci-dummy"
-          BEDROCK_MODEL_ID: "anthropic.claude-3-5-sonnet-20241022-v2:0"
-          RAG_TOP_K: "5"
         run: |
           python manage.py test --verbosity=2
