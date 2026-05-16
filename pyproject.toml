@@ -13,4 +13,6 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "boto3>=1.43.9",
     "pymupdf>=1.27.2.3",
+    "langchain-qdrant>=1.1.0",
+    "faster-whisper>=1.2.1",
 ]
