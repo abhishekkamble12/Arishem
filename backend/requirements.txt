@@ -9,8 +9,9 @@ python-decouple==3.8
 # Database
 mysqlclient==2.2.6
 
-# AWS
-boto3==1.35.99
+# AWS — boto3/botocore version is resolved by langchain-aws automatically.
+# Do NOT pin boto3 here; it conflicts with langchain-aws's own botocore constraint.
+boto3>=1.35.0
 
 # LangChain stack
 langchain-aws==0.2.14
