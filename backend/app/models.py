@@ -62,8 +62,6 @@ class IngestedFile(models.Model):
         OGG  = "ogg",  "OGG Audio"
         M4A  = "m4a",  "M4A Audio"
 
-    s3_bucket      = models.CharField(max_length=255)
-    s3_key         = models.CharField(max_length=1024)
     file_type      = models.CharField(max_length=10, choices=FileType.choices)
     chunks_stored  = models.PositiveIntegerField(default=0)
     ingested_at    = models.DateTimeField(auto_now_add=True)
