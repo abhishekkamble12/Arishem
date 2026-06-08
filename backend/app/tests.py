@@ -92,14 +92,12 @@ class PermissionTests(TestCase):
 
     def setUp(self):
         self.client = Client()
-        self.viewer_token = _get_token(
-            self.client,
-            *[u := _make_user("viewer@test.com", "Pass1234!", "viewer")] and ["viewer@test.com", "Pass1234!"]
-        )
-        self.editor_token = _get_token(
-            self.client,
-            *[u := _make_user("editor@test.com", "Pass1234!", "editor")] and ["editor@test.com", "Pass1234!"]
-        )
+
+        viewer = _make_user("viewer@test.com", "Pass1234!", "viewer")
+        self.viewer_token = _get_token(self.client, "viewer@test.com", "Pass1234!")
+
+        editor = _make_user("editor@test.com", "Pass1234!", "editor")
+        self.editor_token = _get_token(self.client, "editor@test.com", "Pass1234!")
 
     def _auth(self, token):
         return {"HTTP_AUTHORIZATION": f"Bearer {token}"}

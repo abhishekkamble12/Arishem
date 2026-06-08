@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",  # enables refresh token blacklisting
     "app",
 ]
 
@@ -43,6 +44,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "app.middleware.RequestLoggingMiddleware",
 ]
+
+# Disable redirect from /path to /path/ — our URLs have no trailing slashes
+# and POST bodies are lost on 301 redirects in many clients.
+APPEND_SLASH = False
 
 ROOT_URLCONF = "backend.urls"
 
@@ -89,7 +94,7 @@ else:
         }
     }
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 # Custom user model — must be set before first migration
 AUTH_USER_MODEL = "app.User"
@@ -132,8 +137,8 @@ from datetime import timedelta
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME":  timedelta(hours=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS":  True,   # issue a new refresh token on every refresh
-    "BLACKLIST_AFTER_ROTATION": False, # set True if you add simplejwt blacklist app
+    "ROTATE_REFRESH_TOKENS":  True,
+    "BLACKLIST_AFTER_ROTATION": True,  # old refresh tokens are invalidated immediately
     "ALGORITHM": "HS256",
     "AUTH_HEADER_TYPES": ("Bearer",),
     "USER_ID_FIELD": "id",

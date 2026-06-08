@@ -44,7 +44,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    role = serializers.CharField(source="role", read_only=True)
+    role = serializers.CharField(read_only=True)
 
     class Meta:
         model  = User

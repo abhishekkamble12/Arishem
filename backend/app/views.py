@@ -257,7 +257,9 @@ def list_files(request):
     List all ingested files.
     Requires: any authenticated user.
     """
-    files = IngestedFile.objects.all().values(
-        "s3_key", "file_type", "chunks_stored", "ingested_at", "uploaded_by__email"
+    files = list(
+        IngestedFile.objects.all().values(
+            "s3_key", "file_type", "chunks_stored", "ingested_at", "uploaded_by__email"
+        )
     )
-    return Response({"files": list(files), "total": len(files)}, status=status.HTTP_200_OK)
+    return Response({"files": files, "total": len(files)}, status=status.HTTP_200_OK)

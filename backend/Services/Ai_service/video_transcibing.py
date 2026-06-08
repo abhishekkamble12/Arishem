@@ -127,15 +127,32 @@ def _fetch_transcript_text(transcript_uri: str) -> str:
     """
     Download the Transcribe output JSON from S3 and extract the transcript text.
 
-    The URI looks like:
-        https://s3.amazonaws.com/bucket/prefix/job-name.json
-    We parse bucket + key from it and use boto3 to fetch.
+    Handles both URI formats AWS Transcribe may return:
+        https://s3.amazonaws.com/bucket/key          (us-east-1 path-style)
+        https://s3.us-west-2.amazonaws.com/bucket/key (regional path-style)
+        https://bucket.s3.amazonaws.com/key          (virtual-hosted style)
+        https://bucket.s3.us-east-1.amazonaws.com/key
     """
-    # Strip the https://s3.amazonaws.com/ prefix
-    path = transcript_uri.replace("https://s3.amazonaws.com/", "")
-    bucket, _, key = path.partition("/")
+    from urllib.parse import urlparse
 
-    s3 = _get_s3_client()
+    parsed = urlparse(transcript_uri)
+    host   = parsed.hostname  # e.g. "s3.amazonaws.com" or "s3.us-east-1.amazonaws.com"
+                              # or "mybucket.s3.amazonaws.com"
+    path   = parsed.path.lstrip("/")  # e.g. "bucket/prefix/job.json" or "prefix/job.json"
+
+    # Virtual-hosted style: bucket name is a subdomain of s3*.amazonaws.com
+    # e.g. mybucket.s3.amazonaws.com  or  mybucket.s3.us-east-1.amazonaws.com
+    if host and not host.startswith("s3"):
+        # host looks like "mybucket.s3.amazonaws.com"
+        bucket = host.split(".")[0]
+        key    = path
+    else:
+        # Path-style: first path component is the bucket
+        bucket, _, key = path.partition("/")
+
+    logger.debug("Fetching transcript: bucket=%s key=%s", bucket, key)
+
+    s3  = _get_s3_client()
     obj = s3.get_object(Bucket=bucket, Key=key)
     data = json.loads(obj["Body"].read())
 

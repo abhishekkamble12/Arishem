@@ -4,7 +4,6 @@ from django.db import models
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
 # We use Django's built-in Group model as the role carrier.
-# Three groups are created automatically by the migration: admin, editor, viewer.
 ROLE_ADMIN  = "admin"
 ROLE_EDITOR = "editor"
 ROLE_VIEWER = "viewer"
@@ -25,7 +24,7 @@ class User(AbstractUser):
     REQUIRED_FIELDS = ["username"]   # kept for createsuperuser compatibility
 
     class Meta:
-        db_table = "auth_user"
+        db_table = "app_user"
 
     @property
     def role(self) -> str:
@@ -61,6 +60,11 @@ class IngestedFile(models.Model):
         FLAC = "flac", "FLAC Audio"
         OGG  = "ogg",  "OGG Audio"
         M4A  = "m4a",  "M4A Audio"
+
+    # ── FIX: these two fields were missing from the model ────────────────────
+    s3_bucket      = models.CharField(max_length=255)
+    # 500 chars keeps us well under MySQL's 3072-byte unique-index limit (utf8mb4 = 4 bytes/char)
+    s3_key         = models.CharField(max_length=500)
 
     file_type      = models.CharField(max_length=10, choices=FileType.choices)
     chunks_stored  = models.PositiveIntegerField(default=0)
