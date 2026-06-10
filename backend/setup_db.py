@@ -62,23 +62,74 @@ with connection.cursor() as c:
         # Now rename
         c.execute("RENAME TABLE auth_user TO app_user")
         print("Renamed auth_user -> app_user")
-
-        # Recreate FKs pointing to app_user
-        c.execute("""
-            ALTER TABLE auth_user_groups
-            ADD CONSTRAINT fk_aug_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
-        """)
-        c.execute("""
-            ALTER TABLE auth_user_user_permissions
-            ADD CONSTRAINT fk_auup_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
-        """)
-        c.execute("""
-            ALTER TABLE django_admin_log
-            ADD CONSTRAINT fk_dal_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
-        """)
-        print("Recreated FKs pointing to app_user")
     else:
         print("Neither auth_user nor app_user exists — will be created by migrate")
+
+    # Rename groups & user permissions tables if they exist under old names
+    c.execute("SHOW TABLES LIKE 'app_user_groups'")
+    app_user_groups_exists = bool(c.fetchone())
+    c.execute("SHOW TABLES LIKE 'auth_user_groups'")
+    auth_user_groups_exists = bool(c.fetchone())
+
+    if auth_user_groups_exists and not app_user_groups_exists:
+        c.execute("RENAME TABLE auth_user_groups TO app_user_groups")
+        print("Renamed auth_user_groups -> app_user_groups")
+
+    c.execute("SHOW TABLES LIKE 'app_user_user_permissions'")
+    app_user_user_permissions_exists = bool(c.fetchone())
+    c.execute("SHOW TABLES LIKE 'auth_user_user_permissions'")
+    auth_user_user_permissions_exists = bool(c.fetchone())
+
+    if auth_user_user_permissions_exists and not app_user_user_permissions_exists:
+        c.execute("RENAME TABLE auth_user_user_permissions TO app_user_user_permissions")
+        print("Renamed auth_user_user_permissions -> app_user_user_permissions")
+
+    # Recreate FKs pointing to app_user
+    c.execute("SHOW TABLES LIKE 'app_user_groups'")
+    if c.fetchone():
+        c.execute("""
+            SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'app_user_groups'
+              AND CONSTRAINT_NAME = 'fk_aug_user'
+        """)
+        if not c.fetchone():
+            c.execute("""
+                ALTER TABLE app_user_groups
+                ADD CONSTRAINT fk_aug_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+            """)
+            print("Recreated FK fk_aug_user on app_user_groups")
+
+    c.execute("SHOW TABLES LIKE 'app_user_user_permissions'")
+    if c.fetchone():
+        c.execute("""
+            SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'app_user_user_permissions'
+              AND CONSTRAINT_NAME = 'fk_auup_user'
+        """)
+        if not c.fetchone():
+            c.execute("""
+                ALTER TABLE app_user_user_permissions
+                ADD CONSTRAINT fk_auup_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+            """)
+            print("Recreated FK fk_auup_user on app_user_user_permissions")
+
+    c.execute("SHOW TABLES LIKE 'django_admin_log'")
+    if c.fetchone():
+        c.execute("""
+            SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'django_admin_log'
+              AND CONSTRAINT_NAME = 'fk_dal_user'
+        """)
+        if not c.fetchone():
+            c.execute("""
+                ALTER TABLE django_admin_log
+                ADD CONSTRAINT fk_dal_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+            """)
+            print("Recreated FK fk_dal_user on django_admin_log")
+
 
     # ── 2. Create / fix app_ingestedfile ─────────────────────────────────────
     c.execute("SHOW TABLES LIKE 'app_ingestedfile'")

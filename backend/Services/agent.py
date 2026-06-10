@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 AWS_REGION      = config("AWS_REGION", default="us-east-1")
+BEDROCK_REGION  = config("BEDROCK_REGION", default="us-east-1")
 BEDROCK_MODEL   = config("BEDROCK_MODEL_ID", default="anthropic.claude-3-5-sonnet-20241022-v2:0")
 TOP_K           = int(config("RAG_TOP_K", default=5))
 
@@ -45,12 +46,13 @@ def _get_llm() -> ChatBedrockConverse:
     if _llm is None:
         _llm = ChatBedrockConverse(
             model=BEDROCK_MODEL,
-            region_name=AWS_REGION,
+            region_name=BEDROCK_REGION,
             temperature=0.2,      # low temp → factual, grounded answers
             max_tokens=2048,
         )
-        logger.info("ChatBedrockConverse initialised (model: %s)", BEDROCK_MODEL)
+        logger.info("ChatBedrockConverse initialised (model: %s, region: %s)", BEDROCK_MODEL, BEDROCK_REGION)
     return _llm
+
 
 
 # ---------------------------------------------------------------------------

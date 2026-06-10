@@ -73,22 +73,66 @@ def get_qdrant_client() -> QdrantClient:
 def ensure_collection_exists() -> None:
     """
     Create the Qdrant collection if it doesn't already exist.
+    Recreates it if there is a vector name or dimension mismatch.
     Safe to call multiple times (idempotent).
     """
     client = get_qdrant_client()
-    existing = {c.name for c in client.get_collections().collections}
+    try:
+        existing = {c.name for c in client.get_collections().collections}
+    except Exception as e:
+        logger.error("Failed to list Qdrant collections: %s", e)
+        return
 
-    if QDRANT_COLLECTION not in existing:
+    should_create = QDRANT_COLLECTION not in existing
+
+    if QDRANT_COLLECTION in existing:
+        try:
+            info = client.get_collection(collection_name=QDRANT_COLLECTION)
+            vectors = info.config.params.vectors
+            
+            # Extract current size of the 'content-dense' vector
+            current_size = None
+            if isinstance(vectors, dict):
+                if "content-dense" in vectors:
+                    current_size = vectors["content-dense"].size
+            elif hasattr(vectors, "size"):
+                current_size = vectors.size
+            else:
+                # vectors might be a VectorsConfig object (e.g. in some qdrant_client versions)
+                if hasattr(vectors, "params") and isinstance(vectors.params, dict):
+                    if "content-dense" in vectors.params:
+                        current_size = vectors.params["content-dense"].size
+                elif hasattr(vectors, "params") and hasattr(vectors.params, "size"):
+                    current_size = vectors.params.size
+
+            if current_size is not None and current_size != EMBEDDING_DIMENSION:
+                logger.warning(
+                    "Qdrant collection '%s' vector dimension mismatch: collection has %d, but embedding model has %d. Recreating...",
+                    QDRANT_COLLECTION, current_size, EMBEDDING_DIMENSION
+                )
+                client.delete_collection(collection_name=QDRANT_COLLECTION)
+                should_create = True
+        except Exception as e:
+            logger.warning("Failed to verify Qdrant collection config: %s. Recreating to be safe.", e)
+            try:
+                client.delete_collection(collection_name=QDRANT_COLLECTION)
+            except Exception:
+                pass
+            should_create = True
+
+    if should_create:
         client.create_collection(
             collection_name=QDRANT_COLLECTION,
-            vectors_config=VectorParams(
-                size=EMBEDDING_DIMENSION,
-                distance=Distance.COSINE,
-            ),
+            vectors_config={
+                "content-dense": VectorParams(
+                    size=EMBEDDING_DIMENSION,
+                    distance=Distance.COSINE,
+                )
+            },
         )
-        logger.info("Created Qdrant collection '%s'", QDRANT_COLLECTION)
+        logger.info("Created Qdrant collection '%s' with dimension %d", QDRANT_COLLECTION, EMBEDDING_DIMENSION)
     else:
-        logger.debug("Collection '%s' already exists", QDRANT_COLLECTION)
+        logger.debug("Collection '%s' already exists and matches configuration", QDRANT_COLLECTION)
 
 
 def embed_and_store(chunks: List[Document]) -> int:
@@ -118,6 +162,7 @@ def embed_and_store(chunks: List[Document]) -> int:
         url=QDRANT_URL,
         api_key=QDRANT_API_KEY,
         collection_name=QDRANT_COLLECTION,
+        vector_name="content-dense",
         # force_recreate=False keeps existing vectors — safe for incremental ingestion
     )
 
@@ -135,4 +180,6 @@ def get_vector_store() -> QdrantVectorStore:
         client=get_qdrant_client(),
         collection_name=QDRANT_COLLECTION,
         embedding=get_embeddings(),
+        vector_name="content-dense",
     )
+

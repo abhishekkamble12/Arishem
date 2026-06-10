@@ -5,8 +5,21 @@ Never hardcode credentials here.
 """
 
 import sys
+import os
 from pathlib import Path
 from decouple import config
+
+# Export AWS credentials from .env to environment variables for boto3/botocore
+# Trigger reload: env updated with Claude Sonnet 4.6 model ID.
+for _env_var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"]:
+    _val = config(_env_var, default=None)
+    if _val:
+        os.environ[_env_var] = _val
+
+
+
+
+
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,6 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",  # enables refresh token blacklisting
@@ -35,6 +49,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -44,6 +59,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "app.middleware.RequestLoggingMiddleware",
 ]
+
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
 
 # Disable redirect from /path to /path/ — our URLs have no trailing slashes
 # and POST bodies are lost on 301 redirects in many clients.
@@ -120,9 +138,11 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # ── REST Framework ────────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
-    "DEFAULT_PARSER_CLASSES":   ["rest_framework.parsers.JSONParser"],
-    # All endpoints require a valid JWT by default.
-    # Individual views can override with AllowAny where needed (login, register).
+    "DEFAULT_PARSER_CLASSES": [
+        "rest_framework.parsers.JSONParser",
+        "rest_framework.parsers.MultiPartParser",
+        "rest_framework.parsers.FormParser",
+    ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
