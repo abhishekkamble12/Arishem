@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase, Client
 from django.urls import reverse
+from unittest.mock import patch
 
 User = get_user_model()
 
@@ -115,8 +116,10 @@ class PermissionTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
-    def test_upload_allowed_for_editor(self):
+    @patch('app.views.run_ingestion_task.delay')
+    def test_upload_allowed_for_editor(self, mock_delay):
         # Will fail at extraction (no real S3), but must NOT be 401 or 403
+        mock_delay.return_value.id = "mock_task_id"
         resp = self.client.post(
             "/app/ai/upload",
             {"s3_key": "test.pdf"},
