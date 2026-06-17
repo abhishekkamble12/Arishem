@@ -6,9 +6,15 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from .models import ALL_ROLES, ROLE_VIEWER
+from .models import ALL_ROLES, ROLE_VIEWER, Workspace
 
 User = get_user_model()
+
+
+class WorkspaceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Workspace
+        fields = ["id", "name", "created_at"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -40,12 +46,17 @@ class RegisterSerializer(serializers.ModelSerializer):
         group, _ = Group.objects.get_or_create(name=role)
         user.groups.set([group])
 
+        # Create a default workspace for the user
+        workspace = Workspace.objects.create(name=f"{username}'s Workspace")
+        workspace.members.add(user)
+
         return user
 
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.CharField(read_only=True)
+    workspaces = WorkspaceSerializer(many=True, read_only=True)
 
     class Meta:
         model  = User
-        fields = ["id", "email", "username", "role", "date_joined", "is_active"]
+        fields = ["id", "email", "username", "role", "workspaces", "date_joined", "is_active"]

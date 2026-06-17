@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { aiApi } from '../api/ai';
+import { useAuthStore } from '../store/authStore';
 import { Upload, HelpCircle, CheckCircle, AlertCircle, FileText, Film, Loader2, CloudUpload, Link as LinkIcon } from 'lucide-react';
 
 type UploadMode = 'direct' | 's3key';
@@ -7,6 +8,7 @@ type UploadMode = 'direct' | 's3key';
 const ACCEPTED = '.pdf,.docx,.pptx,.mp4,.mov,.avi,.mkv,.mp3,.wav,.flac,.ogg,.m4a';
 
 export const UploadPage: React.FC = () => {
+  const { activeWorkspaceId } = useAuthStore();
   const [mode, setMode] = useState<UploadMode>('direct');
 
   // Direct upload state
@@ -20,12 +22,16 @@ export const UploadPage: React.FC = () => {
   // Shared state
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [result, setResult] = useState<{ message: string; chunks: number; fileType: string; uploadedBy: string; s3Key: string } | null>(null);
+  const [result, setResult] = useState<{ message: string; s3Key: string; taskId: string; fileId: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const reset = () => {
+  const clearInputs = () => {
     setSelectedFile(null);
     setS3Key('');
+  };
+
+  const reset = () => {
+    clearInputs();
     setUploadStatus('idle');
     setResult(null);
     setErrorMsg(null);
@@ -45,24 +51,30 @@ export const UploadPage: React.FC = () => {
     setErrorMsg(null);
     setResult(null);
 
+    if (!activeWorkspaceId) {
+      setErrorMsg('No active workspace selected. Please select a workspace first.');
+      setUploadStatus('error');
+      setLoading(false);
+      return;
+    }
+
     try {
       let response;
       if (mode === 'direct') {
         if (!selectedFile) return;
-        response = await aiApi.uploadDirect(selectedFile);
+        response = await aiApi.uploadDirect(selectedFile, activeWorkspaceId);
       } else {
         if (!s3Key.trim()) return;
-        response = await aiApi.upload(s3Key.trim());
+        response = await aiApi.upload(s3Key.trim(), activeWorkspaceId);
       }
       setResult({
         message: response.message,
-        chunks: response.chunks_stored,
-        fileType: response.file_type,
-        uploadedBy: response.uploaded_by,
-        s3Key: response.s3_key,
+        s3Key: response.file.s3_key,
+        taskId: response.task_id,
+        fileId: response.file.id,
       });
       setUploadStatus('success');
-      reset();
+      clearInputs();
     } catch (err: any) {
       setUploadStatus('error');
       const code = err.response?.status;
@@ -119,13 +131,12 @@ export const UploadPage: React.FC = () => {
                 <div className="flex items-start space-x-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl text-sm animate-fade-in">
                   <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="font-bold text-emerald-300">Ingested Successfully</h4>
+                    <h4 className="font-bold text-emerald-300">Ingestion Queued</h4>
                     <p className="mt-1 text-xs text-emerald-400/80">{result.s3Key}</p>
-                    <div className="flex flex-wrap gap-4 mt-3 text-xs">
-                      <span>Type: <strong className="text-white uppercase">{result.fileType}</strong></span>
-                      <span>Chunks: <strong className="text-white">{result.chunks}</strong></span>
-                      <span>By: <strong className="text-white">{result.uploadedBy}</strong></span>
-                    </div>
+                    <p className="mt-2.5 text-xs text-dark-300 leading-relaxed">
+                      The file has been queued for ingestion in the background (Task ID: <code className="text-brand-400 font-mono">{result.taskId.substring(0, 8)}...</code>).
+                      You can monitor its status under the "Files" tab on the <strong>Dashboard</strong>.
+                    </p>
                   </div>
                 </div>
               )}

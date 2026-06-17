@@ -16,6 +16,12 @@ for _env_var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKE
     if _val:
         os.environ[_env_var] = _val
 
+# Export Groq credentials
+_groq_key = config("GROQ_API_KEY", default=None)
+if _groq_key:
+    os.environ["GROQ_API_KEY"] = _groq_key
+
+
 
 
 
@@ -193,3 +199,15 @@ LOGGING = {
         },
     },
 }
+
+# ── Celery & Task Broker Settings ─────────────────────────────────────────────
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="amqp://guest:guest@localhost:5672//")
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default="redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+# Ingestion Queue Limits (Backpressure management)
+MAX_INGESTION_QUEUE_DEPTH = config("MAX_INGESTION_QUEUE_DEPTH", default=50, cast=int)
+

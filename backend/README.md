@@ -2,6 +2,9 @@
 
 A production-ready **Retrieval-Augmented Generation (RAG) API** built with Django REST Framework. Upload documents and media files from AWS S3, embed them into a Qdrant vector store using Amazon Bedrock, and query them with natural language — all behind a JWT-secured, role-based API.
 
+* **Hybrid AI Engine**: Initially built using **AWS Bedrock (Claude 3.5 Sonnet)**, the query inference engine was migrated to **Groq (Meta Llama 3.3 70B)** to reduce token latency to sub-second speeds and significantly cut inference costs. Vector embeddings remain generated via AWS Bedrock Titan.
+* **Asynchronous Ingestion**: Media transcribing (AWS Transcribe) and document extractions are offloaded to **Celery** background tasks to prevent thread starvation and timeouts.
+
 ---
 
 ## Table of Contents
@@ -17,8 +20,9 @@ A production-ready **Retrieval-Augmented Generation (RAG) API** built with Djang
   - [With Docker Compose](#with-docker-compose)
 - [Running Tests](#running-tests)
 - [API Reference](#api-reference)
-  - [Authentication](#authentication)
+  - [Authentication & Workspaces](#authentication--workspaces)
   - [AI / RAG Pipeline](#ai--rag-pipeline)
+  - [AI Observability & Monitoring](#ai-observability--monitoring)
 - [Ingestion Pipeline](#ingestion-pipeline)
 - [Role-Based Access Control](#role-based-access-control)
 - [Services Layer](#services-layer)
@@ -35,34 +39,34 @@ A production-ready **Retrieval-Augmented Generation (RAG) API** built with Djang
 ## Architecture
 
 ```
-Client
+Client (Auth / Select Workspace)
   │
   ▼
-Django REST API  (JWT auth + RBAC)
+Django REST API (JWT auth + Active Workspace context + RBAC)
   │
-  ├── POST /app/ai/upload ──► Extractor ──► S3 download / AWS Transcribe
-  │                                │
-  │                                ▼
-  │                         LangChain Splitter
-  │                         (800 tokens, 150 overlap)
-  │                                │
-  │                                ▼
-  │                    Bedrock Titan Embeddings v2
-  │                         (1024 dimensions)
-  │                                │
-  │                                ▼
-  │                      Qdrant Cloud (vector store)
+  ├── POST /app/ai/upload ──► Enqueue Task ──► Return 202 Accepted (Immediately)
+  │                                                │
+  │                                                ▼
+  │                                        [Celery Ingestion Task]
+  │                                        ├─ Download from S3 / AWS Transcribe
+  │                                        ├─ LangChain Splitting (800 token chunks)
+  │                                        ├─ Bedrock Titan Embeddings (1024-dim)
+  │                                        ├─ Qdrant Cloud (workspace metadata payload)
+  │                                        └─ workspace_id payload index (Strict Filtered)
   │
-  └── POST /app/ai/query ──► Qdrant similarity search (top-k)
-                                   │
-                                   ▼
-                          Bedrock Claude 3.5 Sonnet
-                                   │
-                                   ▼
-                          Answer + Source citations
+  ├── POST /app/ai/query ──► Qdrant Similarity Search (Filtered by workspace_id)
+  │                                │
+  │                                ├── [Average score < 0.35] ──► Immediate OOD Rejection (No LLM call)
+  │                                │
+  │                                └── [Average score >= 0.35] ──► Groq Meta Llama 3.3 70B
+  │                                                                     │
+  │                                                                     ▼
+  │                                                            Answer + Citations
+  │
+  └── Telemetry ──────────► PredictionLog / DriftLog (Observability & alerts)
 ```
 
-Files are stored in **AWS S3**. The API downloads them to a temp file for parsing, then deletes the temp file immediately after — nothing persists locally.
+Files are stored in **AWS S3**. The Celery background worker downloads them to a temp file for parsing, then deletes the temp file immediately after — nothing persists locally.
 
 ---
 
@@ -73,13 +77,14 @@ Files are stored in **AWS S3**. The API downloads them to a temp file for parsin
 | Web framework | Django 5.1 + Django REST Framework 3.15 |
 | Auth | JWT via `djangorestframework-simplejwt` 5.3 |
 | Database | AWS RDS MySQL (SQLite for CI/testing) |
+| Task Queue | Celery + RabbitMQ / Redis Broker |
 | Vector store | Qdrant Cloud |
 | Embeddings | Amazon Bedrock — Titan Embed Text v2 (1024-dim) |
-| LLM | Amazon Bedrock — Claude 3.5 Sonnet |
+| LLM | Groq — Meta Llama 3.3 70B (Migrated from Bedrock Claude 3.5 Sonnet to save cost) |
 | File storage | AWS S3 |
 | Video/audio transcription | AWS Transcribe |
 | Document parsing | PyMuPDF (PDF), Docx2txt (DOCX), Unstructured (PPTX) |
-| LangChain | `langchain-aws`, `langchain-community`, `langchain-qdrant` |
+| LangChain | `langchain-groq`, `langchain-aws`, `langchain-community`, `langchain-qdrant` |
 | Server | Gunicorn |
 | Containerisation | Docker (multi-stage) + Docker Compose |
 | CI | GitHub Actions |
@@ -129,16 +134,22 @@ backend/
 
 ## Features
 
-- **JWT authentication** — register, login, token refresh, and profile endpoint
+- **Asynchronous Ingestion Pipeline** — Offloads document parsing and audio/video transcription to **Celery** background tasks. Returns `202 Accepted` immediately, allowing users to track ingestion progress via UI status indicators.
+- **Out-of-Domain (OOD) Confidence Rejection** — Bypasses the LLM and instantly returns a standard refusal if context similarity drops below `0.35` to prevent hallucinations.
+- **Cost-Efficient Groq Inference** — Utilizes **Meta Llama 3.3 70B** on Groq for ultra-fast, cheap, and robust query generation (migrated from AWS Bedrock Claude 3.5 Sonnet).
+- **Multi-Tenant Workspace Isolation** — SaaS-style organization folder architecture. Users are members of workspaces, and all uploaded files and RAG queries are isolated to the active workspace using Qdrant payload filters.
+- **AI Observability & Monitoring** — Tracks every RAG prediction (inputs, outputs, latency, confidence, errors) and logs them in a structured schema.
+- **Drift Detection & Alerts** — Automatically computes a sliding average of similarity scores to detect data drift, sending email alerts to administrators when drift or error thresholds are violated.
+- **Interactive Dashboard** — Visualizes metrics such as queries per day, average response time, error rate, and drift history in a clean dashboard UI.
+- **JWT authentication** — register, login, token refresh, workspaces listing, and profile endpoint
 - **Refresh token blacklisting** — rotated refresh tokens are immediately invalidated
 - **Role-based access control** — three roles: `admin`, `editor`, `viewer`
 - **Multi-format ingestion** — PDF, DOCX, PPTX, MP4, MOV, AVI, MKV, MP3, WAV, FLAC, OGG, M4A
 - **Video/audio transcription** — AWS Transcribe with speaker diarisation (up to 10 speakers)
 - **Semantic chunking** — 800-token chunks with 150-token overlap
-- **Vector embeddings** — Amazon Bedrock Titan Embed Text v2 (1024 dimensions, cosine similarity)
-- **RAG querying** — top-k retrieval from Qdrant + Claude 3.5 Sonnet grounded answers with source citations
+- **Vector embeddings** — Amazon Bedrock Titan Embeddings v2 (1024 dimensions, cosine similarity) with a Qdrant payload index for strict workspace filtering
 - **Duplicate detection** — prevents re-ingesting the same S3 key
-- **Audit trail** — every ingested file tracked with uploader, timestamp, and chunk count
+- **Audit trail** — every ingested file tracked with workspace, uploader, timestamp, and chunk count
 - **Request logging** — every request logged with method, path, status, and duration
 - **No trailing-slash redirects** — `APPEND_SLASH = False` prevents POST body loss on redirect
 - **Docker-ready** — multi-stage build, non-root user, Gunicorn
@@ -151,8 +162,10 @@ backend/
 - Python 3.12+
 - AWS account with access to:
   - **S3** — file storage
-  - **Bedrock** — Titan Embeddings + Claude 3.5 Sonnet (enable model access in AWS console)
+  - **Bedrock** — Titan Embeddings (enable Titan Text Embeddings access in AWS console)
   - **Transcribe** — for video/audio files
+- **Groq API Key** — for Llama 3.3 inference
+- **RabbitMQ** or **Redis** broker — for Celery background tasks
 - **Qdrant Cloud** cluster (free tier works for development)
 - **MySQL** database (AWS RDS for production; SQLite works locally with `DB_ENGINE` override)
 - Docker + Docker Compose (optional)
@@ -186,7 +199,9 @@ cp backend/backend/.env.example backend/backend/.env
 | `AWS_REGION` | ✅ | AWS region, e.g. `us-east-1` |
 | `S3_BUCKET` | ✅ | S3 bucket where files are stored |
 | `TRANSCRIBE_OUTPUT_BUCKET` | ✅ | S3 bucket for Transcribe JSON output (can be same as `S3_BUCKET`) |
-| `BEDROCK_MODEL_ID` | ❌ | Claude model ID, default `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| `GROQ_API_KEY` | ✅ | Groq API Key for inference |
+| `GROQ_MODEL_ID` | ❌ | Model ID on Groq, default `llama-3.3-70b-versatile` |
+| `RAG_CONFIDENCE_THRESHOLD` | ❌ | OOD Rejection Threshold, default `0.35` |
 | `RAG_TOP_K` | ❌ | Chunks to retrieve per query, default `5` |
 
 > **Production tip:** Never set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in production. Attach an IAM role to your EC2 instance or ECS task — boto3 picks it up automatically.
@@ -255,7 +270,14 @@ python manage.py migrate  # applies any remaining migrations
 python manage.py createsuperuser
 ```
 
-**7. Start the development server**
+**7. Start the Celery worker**
+
+In a separate terminal, start the Celery background worker:
+```bash
+celery -A backend worker --loglevel=info -P solo
+```
+
+**8. Start the development server**
 
 ```bash
 python manage.py runserver
@@ -456,6 +478,28 @@ Get the current authenticated user's profile.
 
 ---
 
+#### `GET /app/auth/workspaces`
+
+Get the list of workspaces that the authenticated user belongs to.
+
+**Access:** Any authenticated user
+
+**Headers:** `Authorization: Bearer <access-token>`
+
+**Response `200`:**
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Default Workspace",
+    "created_at": "2026-06-17T15:00:00Z"
+  }
+]
+```
+
+---
+
 ### AI / RAG Pipeline
 
 All AI endpoints require a valid JWT:
@@ -476,9 +520,12 @@ Ingest a file from S3 into the Qdrant vector store. The file must already exist 
 
 ```json
 {
-  "s3_key": "documents/report.pdf"
+  "s3_key": "documents/report.pdf",
+  "workspace_id": 1
 }
 ```
+
+`workspace_id` is optional, defaulting to the user's first available workspace.
 
 **Response `201`:**
 
@@ -492,22 +539,37 @@ Ingest a file from S3 into the Qdrant vector store. The file must already exist 
 }
 ```
 
-**Error responses:**
+---
 
-| Status | Reason |
-|---|---|
-| `400` | `s3_key` missing or empty |
-| `403` | Viewer role — upload not permitted |
-| `409` | File already ingested — delete it first to re-ingest |
-| `415` | Unsupported file type |
-| `422` | No text could be extracted from the file |
-| `502` | S3 download, extraction, or embedding failure |
+#### `POST /app/ai/upload-direct`
+
+Upload a file directly from the browser/client. The API saves the file to S3 under `uploads/` and then runs the ingestion pipeline.
+
+**Access:** `editor` or `admin` role only
+
+**Request type:** `multipart/form-data`
+
+**Request body:**
+- `file`: The binary file to upload.
+- `workspace_id`: (Optional) The workspace ID.
+
+**Response `201`:**
+
+```json
+{
+  "message": "File ingested successfully",
+  "s3_key": "uploads/report.pdf",
+  "file_type": "pdf",
+  "chunks_stored": 42,
+  "uploaded_by": "user@example.com"
+}
+```
 
 ---
 
 #### `POST /app/ai/query`
 
-Ask a natural language question over all ingested documents.
+Ask a natural language question over all ingested documents in a specific workspace.
 
 **Access:** Any authenticated user (`viewer`, `editor`, `admin`)
 
@@ -516,11 +578,12 @@ Ask a natural language question over all ingested documents.
 ```json
 {
   "question": "What are the key findings in the Q1 report?",
-  "top_k": 5
+  "top_k": 5,
+  "workspace_id": 1
 }
 ```
 
-`top_k` is optional, defaults to the `RAG_TOP_K` env var (default `5`).
+`workspace_id` is optional, defaulting to the user's first available workspace. `top_k` is optional, defaults to the `RAG_TOP_K` env var (default `5`).
 
 **Response `200`:**
 
@@ -532,23 +595,16 @@ Ask a natural language question over all ingested documents.
 }
 ```
 
-If no relevant documents are found:
-
-```json
-{
-  "answer": "I don't have any relevant documents to answer that question.",
-  "sources": [],
-  "chunks": 0
-}
-```
-
 ---
 
 #### `GET /app/ai/files`
 
-List all files ingested into the vector store.
+List all files ingested into the vector store for a specific workspace.
 
 **Access:** Any authenticated user
+
+**Query parameters:**
+- `workspace_id`: (Optional) Workspace ID. Defaults to user's first workspace.
 
 **Response `200`:**
 
@@ -564,6 +620,71 @@ List all files ingested into the vector store.
     }
   ],
   "total": 1
+}
+```
+
+---
+
+#### `DELETE /app/ai/files/delete`
+
+Delete an ingested file tracking record. Note that this only removes the file metadata record from the relational database; it does not delete S3 files or the Qdrant vectors.
+
+**Access:** `editor` or `admin` role only
+
+**Request body:**
+```json
+{
+  "s3_key": "documents/report.pdf"
+}
+```
+
+**Response `200`:**
+```json
+{
+  "message": "'documents/report.pdf' removed successfully"
+}
+```
+
+---
+
+### AI Observability & Monitoring
+
+All monitoring endpoints require a valid JWT with `editor` or `admin` roles.
+
+---
+
+#### `GET /app/ai/monitoring`
+
+Fetch aggregated analytics and logs for the Observability Dashboard.
+
+**Access:** `editor` or `admin` role only
+
+**Query parameters:**
+- `workspace_id`: (Optional) Workspace ID. Defaults to user's first workspace.
+
+**Response `200`:**
+```json
+{
+  "total_predictions": 152,
+  "error_count": 3,
+  "avg_latency": 2450.35,
+  "avg_confidence": 0.5234,
+  "chart_data": [
+    { "date": "2026-06-11", "count": 12 },
+    { "date": "2026-06-12", "count": 25 },
+    { "date": "2026-06-13", "count": 18 },
+    { "date": "2026-06-14", "count": 30 },
+    { "date": "2026-06-15", "count": 22 },
+    { "date": "2026-06-16", "count": 15 },
+    { "date": "2026-06-17", "count": 30 }
+  ],
+  "recent_drifts": [
+    {
+      "id": 1,
+      "drift_score": 0.3124,
+      "timestamp": "2026-06-17T15:20:00Z"
+    }
+  ]
 }
 ```
 
@@ -633,7 +754,41 @@ POST /app/ai/upload  { "s3_key": "lecture.mp4" }
         embed_and_store()  →  Qdrant Cloud
 ```
 
-> **Note:** Transcription is synchronous and can take up to 30 minutes for long files. For production use with many video uploads, consider offloading to a task queue (Celery + SQS).
+> **Eventual Consistency & Dual-Write Resolution:**
+> Ingestion operations involve writing metadata to a relational database (MySQL) and vectors to a vector database (Qdrant) — two non-transactional distributed data stores. To prevent partial failure inconsistencies:
+> 1. Django writes the file record in a `PENDING` state first.
+> 2. The worker picks up the job and transitions it to `PROCESSING` before generating embeddings.
+> 3. The record is updated to `SUCCESS` (setting the chunk count) **only after** Qdrant confirms successful storage of the vectors.
+> 4. Any failure during transcription, extraction, or vector storage transitions the record to `FAILED`, storing the raw error message.
+> 5. A periodic reconciliation Celery task runs to identify and mark `FAILED` any records stuck in a transition state (`PENDING` or `PROCESSING`) for longer than 30 minutes.
+>
+> **Asynchronous Producer-Consumer Ingestion Queue & Backpressure Handling:**
+> Synchronous execution of text extraction and 30-minute media transcription jobs blocks web request workers, leading to thread starvation, DB connection exhaustion, and gateway timeouts.
+> To address this, the pipeline has been decoupled into a producer-consumer architecture utilizing **Celery + RabbitMQ/Redis**.
+> - **Producer (Django API)**: Writes a file tracking record in the relational DB as `PENDING` and immediately enqueues the job to RabbitMQ. Returns `202 Accepted` with a job ID in under 100ms.
+> - **Consumer (Celery Workers)**: Asynchronously consumes tasks, polling AWS Transcribe, executing chunking, calling Bedrock embeddings, and saving to Qdrant.
+> - **Backpressure Handling**: If workers fall behind and jobs start backing up, the system must protect database and worker resources. The API enforces a strict queue depth threshold (`MAX_INGESTION_QUEUE_DEPTH`, default 50) checking active jobs (`PENDING` or `PROCESSING`). If this limit is breached, the API immediately rejects new ingestion requests with `503 Service Unavailable`, forcing client-side backoff.
+> - **Scale Mitigation**: Under high production loads, workers should be autoscaled horizontally (e.g., KEDA on Kubernetes scaling workers based on RabbitMQ queue length). Rejecting with a `503` acts as a fail-safe threshold to protect downstream services when autoscaling cannot keep up.
+>
+> **Metered Dependency Cost-Control & Role-Based Throttling:**
+> Unlike standard web APIs that read from local databases, AI-engineering APIs invoke metered external services (AWS Bedrock, AWS Transcribe, Qdrant Cloud, and Groq LLMs) where each invocation translates to real financial costs. 
+> To enforce cost control and budgeting:
+> - **Dynamic Role Throttling**: A custom DRF throttle class `CostControlRoleThrottle` dynamically limits API calls based on workspace roles, ensuring expensive operations are not abused:
+>   - `admin`: High allowance (e.g., 100 req/min) for workspace management.
+>   - `editor`: Medium allowance (e.g., 60 req/min) to balance ingestion tasks.
+>   - `viewer`: Heavily capped allowance (e.g., 10 req/min) to prevent query token burn.
+> - **Rejection Bypassing**: The system incorporates Out-of-Domain (OOD) Confidence Rejection. If retrieved chunk similarity averages below `0.35`, the LLM inference call is skipped, returning a cached refusal response to control external LLM token costs.
+>
+> **Multi-Tenant Data Isolation Architecture (Tradeoffs):**
+> When building multi-tenant RAG applications, two major patterns are used for database level isolation:
+> 1. **Collection-per-Tenant**: Provisioning a separate Qdrant collection for each workspace.
+>    * *Pros*: Strongest security isolation boundaries, zero risk of cross-tenant leakage, easier collection deletion.
+>    * *Cons*: Excessive operational overhead, doesn't scale to thousands of tenants due to hardware/RAM overhead per collection.
+> 2. **Metadata Payload Filtering (Used Here)**: Storing all data in a single collection and filtering search requests using tenant metadata.
+>    * *Pros*: Highly cost-efficient, operates on a single shared index, scales automatically.
+>    * *Cons*: Requires strict validation rules to avoid leaks due to coding bugs.
+> 
+> *Our Implementation*: To address data leakage, Arishem enforces strict workspace filtering at the API layer and the vector database layer via Qdrant's payload index on `metadata.workspace_id`. Furthermore, the system layers role-based context constraints: users with the `viewer` role are dynamically locked to their own uploads via a secondary `metadata.uploaded_by` search filter. Admin and editor roles query across all workspace resources.
 
 ---
 
@@ -738,6 +893,19 @@ Claude is instructed via system prompt to only use retrieved context and always 
 
 ## Data Models
 
+### `Workspace` (`app_workspace` table)
+
+Groups users and files to provide SaaS-style tenant folder isolation.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | AutoField (INT) | Primary key |
+| `name` | CharField(100) | Name of the workspace / folder |
+| `created_at` | DateTimeField | Creation timestamp |
+| `members` | M2M → User | Users who belong to this workspace |
+
+---
+
 ### `User` (`app_user` table)
 
 Extends Django's `AbstractUser`. Uses **email as the login identifier**.
@@ -766,14 +934,49 @@ Tracks every file successfully ingested into Qdrant.
 |---|---|---|
 | `id` | AutoField (INT) | Primary key |
 | `s3_bucket` | CharField(255) | S3 bucket name |
-| `s3_key` | CharField(500) | S3 object key (max 500 chars for MySQL index compatibility) |
+| `s3_key` | CharField(500) | S3 object key |
 | `file_type` | CharField(10) | One of the `FileType` choices |
 | `chunks_stored` | PositiveIntegerField | Number of vector chunks created |
 | `ingested_at` | DateTimeField | Auto-set on creation |
 | `transcribe_job` | CharField(255) | AWS Transcribe job name (media only, nullable) |
 | `uploaded_by` | FK → User | `SET NULL` on user deletion |
+| `workspace` | FK → Workspace | Links files to the workspace container |
 
 Unique constraint on `(s3_bucket, s3_key)` — prevents duplicate ingestion.
+
+---
+
+### `PredictionLog` (`app_predictionlog` table)
+
+Logs every prediction and RAG query made for observability and drift tracking.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | AutoField (INT) | Primary key |
+| `workspace` | FK → Workspace | The workspace this prediction was run in |
+| `user` | FK → User | The user who triggered the request |
+| `input_text` | TextField | Natural language prompt / query |
+| `prediction_text` | TextField | Grounded LLM response |
+| `response_time_ms` | PositiveIntegerField | Response latency in milliseconds |
+| `confidence` | FloatField | Score proxy (e.g. average cosine similarity score) |
+| `error_msg` | TextField | Error details if the query failed |
+| `timestamp` | DateTimeField | Log timestamp |
+
+---
+
+### `DriftLog` (`app_driftlog` table)
+
+Records data drift events detected in the system.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | AutoField (INT) | Primary key |
+| `workspace` | FK → Workspace | The workspace experiencing drift |
+| `drift_score` | FloatField | Average confidence score of the current sliding window |
+| `is_drift_detected`| BooleanField | Flags whether drift was detected |
+| `reference_count` | IntegerField | Size of the baseline comparison log set |
+| `current_count` | IntegerField | Size of the active sliding window evaluated |
+| `timestamp` | DateTimeField | Drift detection event timestamp |
 
 ---
 
@@ -906,3 +1109,11 @@ To run integration tests against real services, create an `ENV_FILE` repository 
 | Timeout | 30 minutes |
 | Output bucket | `TRANSCRIBE_OUTPUT_BUCKET` env var |
 | Output key prefix | `transcripts/<filename>/` |
+
+### AI Observability & Drift Detection
+
+| Parameter | Value | Description |
+|---|---|---|
+| Evaluation Window | 50 queries | Calculates sliding average confidence over the last 50 queries |
+| Drift Threshold | 0.35 | Average similarity score below which drift is flagged |
+| Alert Cooldown | 1 hour | Avoids spamming admins with drift emails |

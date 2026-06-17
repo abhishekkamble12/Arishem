@@ -1,6 +1,8 @@
 """
 RAG Query Agent — the retrieval half of the pipeline.
 
+(Reloaded to pick up updated .env configs)
+
 Takes a user question, retrieves the most relevant chunks from Qdrant,
 and uses Amazon Bedrock (Claude) to generate a grounded answer.
 
@@ -19,7 +21,7 @@ import logging
 from typing import Any
 
 from decouple import config
-from langchain_aws import ChatBedrockConverse
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.documents import Document
 
@@ -31,26 +33,25 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 AWS_REGION      = config("AWS_REGION", default="us-east-1")
-BEDROCK_REGION  = config("BEDROCK_REGION", default="us-east-1")
-BEDROCK_MODEL   = config("BEDROCK_MODEL_ID", default="anthropic.claude-3-5-sonnet-20241022-v2:0")
 TOP_K           = int(config("RAG_TOP_K", default=5))
+CONFIDENCE_THRESHOLD = float(config("RAG_CONFIDENCE_THRESHOLD", default=0.35))
+GROQ_MODEL      = config("GROQ_MODEL_ID", default="llama-3.3-70b-versatile")
 
 # ---------------------------------------------------------------------------
 # Singleton LLM
 # ---------------------------------------------------------------------------
-_llm: ChatBedrockConverse | None = None
+_llm: ChatGroq | None = None
 
 
-def _get_llm() -> ChatBedrockConverse:
+def _get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
-        _llm = ChatBedrockConverse(
-            model=BEDROCK_MODEL,
-            region_name=BEDROCK_REGION,
+        _llm = ChatGroq(
+            model=GROQ_MODEL,
             temperature=0.2,      # low temp → factual, grounded answers
             max_tokens=2048,
         )
-        logger.info("ChatBedrockConverse initialised (model: %s, region: %s)", BEDROCK_MODEL, BEDROCK_REGION)
+        logger.info("ChatGroq initialised (model: %s)", GROQ_MODEL)
     return _llm
 
 
@@ -86,13 +87,16 @@ def _build_prompt(question: str, chunks: list[Document]) -> list:
 # Public API
 # ---------------------------------------------------------------------------
 
-def query(question: str, top_k: int = TOP_K) -> dict[str, Any]:
+def query(question: str, workspace_id: int, top_k: int = TOP_K, user_email: str = None, user_role: str = None) -> dict[str, Any]:
     """
     Answer a question using RAG over the Qdrant vector store.
 
     Args:
         question: The user's natural language question.
+        workspace_id: The active workspace ID to filter contexts from.
         top_k:    Number of chunks to retrieve (default from RAG_TOP_K env var).
+        user_email: The email address of the current user.
+        user_role:  The role of the current user ('viewer', 'editor', or 'admin').
 
     Returns:
         {
@@ -109,21 +113,61 @@ def query(question: str, top_k: int = TOP_K) -> dict[str, Any]:
     if not question:
         raise ValueError("Question cannot be empty")
 
-    logger.info("RAG query: '%s' (top_k=%d)", question[:80], top_k)
+    logger.info("RAG query: '%s' (workspace=%d, top_k=%d, user=%s, role=%s)", question[:80], workspace_id, top_k, user_email, user_role)
 
-    # 1. Retrieve relevant chunks from Qdrant
+    # 1. Retrieve relevant chunks from Qdrant with workspace filter
     vector_store = get_vector_store()
-    chunks: list[Document] = vector_store.similarity_search(question, k=top_k)
 
-    if not chunks:
-        logger.warning("No relevant chunks found for question: '%s'", question[:80])
+    from qdrant_client.http import models as qdrant_models
+    
+    must_conditions = [
+        qdrant_models.FieldCondition(
+            key="metadata.workspace_id",
+            match=qdrant_models.MatchValue(value=workspace_id)
+        )
+    ]
+
+    # Rule-Based Access Control: viewers can only search/ground their own uploaded files
+    if user_role == 'viewer' and user_email:
+        must_conditions.append(
+            qdrant_models.FieldCondition(
+                key="metadata.uploaded_by",
+                match=qdrant_models.MatchValue(value=user_email)
+            )
+        )
+
+    qdrant_filter = qdrant_models.Filter(must=must_conditions)
+
+    chunks_with_scores = vector_store.similarity_search_with_score(
+        question, 
+        k=top_k, 
+        filter=qdrant_filter
+    )
+
+    if not chunks_with_scores:
+        logger.warning("No relevant chunks found for question: '%s' in workspace: %d", question[:80], workspace_id)
         return {
             "answer": "I don't have any relevant documents to answer that question.",
             "sources": [],
             "chunks": 0,
+            "confidence": 0.0,
         }
 
-    logger.info("Retrieved %d chunks, calling LLM…", len(chunks))
+    chunks = [doc for doc, score in chunks_with_scores]
+    avg_score = sum(score for doc, score in chunks_with_scores) / len(chunks_with_scores)
+
+    logger.info("Retrieved %d chunks (avg score: %.4f)", len(chunks), avg_score)
+
+    if avg_score < CONFIDENCE_THRESHOLD:
+        logger.warning("Query average confidence (%.4f) below threshold (%.4f). Rejecting and bypassing LLM.", avg_score, CONFIDENCE_THRESHOLD)
+        return {
+            "answer": "I don't have enough relevant context in the uploaded documents to answer your question confidently.",
+            "sources": [],
+            "chunks": len(chunks),
+            "confidence": avg_score,
+        }
+
+    logger.info("Calling LLM…")
 
     # 2. Build prompt and call Claude
     messages = _build_prompt(question, chunks)
@@ -139,4 +183,5 @@ def query(question: str, top_k: int = TOP_K) -> dict[str, Any]:
         "answer": answer,
         "sources": sources,
         "chunks": len(chunks),
+        "confidence": avg_score,
     }

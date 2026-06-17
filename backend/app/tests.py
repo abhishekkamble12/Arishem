@@ -16,6 +16,10 @@ def _make_user(email, password, role):
     )
     group, _ = Group.objects.get_or_create(name=role)
     user.groups.set([group])
+    
+    from .models import Workspace
+    ws = Workspace.objects.create(name=f"{user.username}'s Workspace")
+    ws.members.add(user)
     return user
 
 
@@ -149,3 +153,44 @@ class PermissionTests(TestCase):
             else:
                 resp = self.client.post(url, body, content_type="application/json")
             self.assertEqual(resp.status_code, 401, msg=f"{method.upper()} {url} should be 401")
+
+
+class WorkspaceTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user_a = _make_user("user_a@test.com", "Pass1234!", "editor")
+        self.token_a = _get_token(self.client, "user_a@test.com", "Pass1234!")
+
+        self.user_b = _make_user("user_b@test.com", "Pass1234!", "editor")
+        self.token_b = _get_token(self.client, "user_b@test.com", "Pass1234!")
+
+    def test_registration_creates_workspace(self):
+        resp = self.client.post(
+            "/app/auth/register",
+            {"email": "new_user@test.com", "password": "Pass1234!", "password2": "Pass1234!"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertIn("workspaces", resp.json()["user"])
+        self.assertEqual(len(resp.json()["user"]["workspaces"]), 1)
+        self.assertEqual(resp.json()["user"]["workspaces"][0]["name"], "new_user's Workspace")
+
+    def test_list_workspaces(self):
+        resp = self.client.get(
+            "/app/auth/workspaces",
+            HTTP_AUTHORIZATION=f"Bearer {self.token_a}"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()), 1)
+        self.assertEqual(resp.json()[0]["name"], "user_a's Workspace")
+
+    def test_cross_workspace_access_denied(self):
+        ws_b = self.user_b.workspaces.first()
+        # User A tries to query using User B's workspace ID
+        resp = self.client.post(
+            "/app/ai/query",
+            {"question": "hello", "workspace_id": ws_b.id},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token_a}"
+        )
+        self.assertEqual(resp.status_code, 403)

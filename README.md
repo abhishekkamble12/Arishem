@@ -2,6 +2,9 @@
 
 A production-ready **Retrieval-Augmented Generation (RAG) API** built with Django REST Framework. Upload documents and media files from AWS S3, embed them into a Qdrant vector store using Amazon Bedrock, and query them with natural language — all behind a JWT-secured, role-based API.
 
+* **Hybrid AI Engine**: Initially built using **AWS Bedrock (Claude 3.5 Sonnet)**, the query inference engine was migrated to **Groq (Meta Llama 3.3 70B)** to reduce token latency to sub-second speeds and significantly cut inference costs. Vector embeddings remain generated via AWS Bedrock Titan.
+* **Asynchronous Ingestion**: Media transcribing (AWS Transcribe) and document extractions are offloaded to **Celery** background tasks to prevent thread starvation and timeouts.
+
 ---
 
 ## Table of Contents
@@ -35,34 +38,31 @@ A production-ready **Retrieval-Augmented Generation (RAG) API** built with Djang
 ## Architecture
 
 ```
-Client
+Client (Auth / Select Workspace)
   │
   ▼
-Django REST API  (JWT auth + RBAC)
+Django REST API (JWT auth + Active Workspace context + RBAC)
   │
-  ├── POST /app/ai/upload ──► Extractor ──► S3 download / AWS Transcribe
-  │                                │
-  │                                ▼
-  │                         LangChain Splitter
-  │                         (800 tokens, 150 overlap)
-  │                                │
-  │                                ▼
-  │                    Bedrock Titan Embeddings v2
-  │                         (1024 dimensions)
-  │                                │
-  │                                ▼
-  │                      Qdrant Cloud (vector store)
+  ├── POST /app/ai/upload ──► Enqueue Task ──► Return 202 Accepted (Immediately)
+  │                                                │
+  │                                                ▼
+  │                                        [Celery Ingestion Task]
+  │                                        ├─ Download from S3 / AWS Transcribe
+  │                                        ├─ LangChain Splitting (800 token chunks)
+  │                                        ├─ Bedrock Titan Embeddings (1024-dim)
+  │                                        └─ Qdrant Cloud (workspace metadata payload)
   │
-  └── POST /app/ai/query ──► Qdrant similarity search (top-k)
+  └── POST /app/ai/query ──► Qdrant Similarity Search (Filtered by workspace_id)
                                    │
-                                   ▼
-                          Bedrock Claude 3.5 Sonnet
+                                   ├── [Average score < 0.35] ──► Immediate OOD Rejection (No LLM call)
                                    │
-                                   ▼
-                          Answer + Source citations
+                                   └── [Average score >= 0.35] ──► Groq Meta Llama 3.3 70B
+                                                                        │
+                                                                        ▼
+                                                               Answer + Citations
 ```
 
-Files are stored in **AWS S3**. The API downloads them to a temp file for parsing, then deletes the temp file immediately after — nothing persists locally.
+Files are stored in **AWS S3**. The Celery background worker downloads them to a temp file for parsing, then deletes the temp file immediately after — nothing persists locally.
 
 ---
 
@@ -73,13 +73,14 @@ Files are stored in **AWS S3**. The API downloads them to a temp file for parsin
 | Web framework | Django 5.1 + Django REST Framework 3.15 |
 | Auth | JWT via `djangorestframework-simplejwt` 5.3 |
 | Database | AWS RDS MySQL (SQLite for CI/testing) |
+| Task Queue | Celery + RabbitMQ / Redis Broker |
 | Vector store | Qdrant Cloud |
 | Embeddings | Amazon Bedrock — Titan Embed Text v2 (1024-dim) |
-| LLM | Amazon Bedrock — Claude 3.5 Sonnet |
+| LLM | Groq — Meta Llama 3.3 70B (Migrated from Bedrock Claude 3.5 Sonnet to save cost) |
 | File storage | AWS S3 |
 | Video/audio transcription | AWS Transcribe |
 | Document parsing | PyMuPDF (PDF), Docx2txt (DOCX), Unstructured (PPTX) |
-| LangChain | `langchain-aws`, `langchain-community`, `langchain-qdrant` |
+| LangChain | `langchain-groq`, `langchain-aws`, `langchain-community`, `langchain-qdrant` |
 | Server | Gunicorn |
 | Containerisation | Docker (multi-stage) + Docker Compose |
 | CI | GitHub Actions |
@@ -129,6 +130,9 @@ backend/
 
 ## Features
 
+- **Asynchronous Ingestion Pipeline** — Offloads document parsing and audio/video transcription to **Celery** background tasks. Returns `202 Accepted` immediately, allowing users to track ingestion progress via UI status indicators.
+- **Out-of-Domain (OOD) Confidence Rejection** — Bypasses the LLM and instantly returns a standard refusal if context similarity drops below `0.35` to prevent hallucinations.
+- **Cost-Efficient Groq Inference** — Utilizes **Meta Llama 3.3 70B** on Groq for ultra-fast, cheap, and robust query generation (migrated from AWS Bedrock Claude 3.5 Sonnet).
 - **JWT authentication** — register, login, token refresh, and profile endpoint
 - **Refresh token blacklisting** — rotated refresh tokens are immediately invalidated
 - **Role-based access control** — three roles: `admin`, `editor`, `viewer`
@@ -136,7 +140,6 @@ backend/
 - **Video/audio transcription** — AWS Transcribe with speaker diarisation (up to 10 speakers)
 - **Semantic chunking** — 800-token chunks with 150-token overlap
 - **Vector embeddings** — Amazon Bedrock Titan Embed Text v2 (1024 dimensions, cosine similarity)
-- **RAG querying** — top-k retrieval from Qdrant + Claude 3.5 Sonnet grounded answers with source citations
 - **Duplicate detection** — prevents re-ingesting the same S3 key
 - **Audit trail** — every ingested file tracked with uploader, timestamp, and chunk count
 - **Request logging** — every request logged with method, path, status, and duration
@@ -151,8 +154,10 @@ backend/
 - Python 3.12+
 - AWS account with access to:
   - **S3** — file storage
-  - **Bedrock** — Titan Embeddings + Claude 3.5 Sonnet (enable model access in AWS console)
+  - **Bedrock** — Titan Embeddings (enable Titan Text Embeddings access in AWS console)
   - **Transcribe** — for video/audio files
+- **Groq API Key** — for Llama 3.3 inference
+- **RabbitMQ** or **Redis** broker — for Celery background tasks
 - **Qdrant Cloud** cluster (free tier works for development)
 - **MySQL** database (AWS RDS for production; SQLite works locally with `DB_ENGINE` override)
 - Docker + Docker Compose (optional)
@@ -186,7 +191,9 @@ cp backend/backend/.env.example backend/backend/.env
 | `AWS_REGION` | ✅ | AWS region, e.g. `us-east-1` |
 | `S3_BUCKET` | ✅ | S3 bucket where files are stored |
 | `TRANSCRIBE_OUTPUT_BUCKET` | ✅ | S3 bucket for Transcribe JSON output (can be same as `S3_BUCKET`) |
-| `BEDROCK_MODEL_ID` | ❌ | Claude model ID, default `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| `GROQ_API_KEY` | ✅ | Groq API Key for inference |
+| `GROQ_MODEL_ID` | ❌ | Model ID on Groq, default `llama-3.3-70b-versatile` |
+| `RAG_CONFIDENCE_THRESHOLD` | ❌ | OOD Rejection Threshold, default `0.35` |
 | `RAG_TOP_K` | ❌ | Chunks to retrieve per query, default `5` |
 
 > **Production tip:** Never set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in production. Attach an IAM role to your EC2 instance or ECS task — boto3 picks it up automatically.
@@ -255,7 +262,14 @@ python manage.py migrate  # applies any remaining migrations
 python manage.py createsuperuser
 ```
 
-**7. Start the development server**
+**7. Start the Celery worker**
+
+In a separate terminal, start the Celery background worker:
+```bash
+celery -A backend worker --loglevel=info -P solo
+```
+
+**8. Start the development server**
 
 ```bash
 python manage.py runserver
@@ -633,7 +647,24 @@ POST /app/ai/upload  { "s3_key": "lecture.mp4" }
         embed_and_store()  →  Qdrant Cloud
 ```
 
-> **Note:** Transcription is synchronous and can take up to 30 minutes for long files. For production use with many video uploads, consider offloading to a task queue (Celery + SQS).
+> **Eventual Consistency & Dual-Write Resolution:**
+> Ingestion operations involve writing metadata to a relational database (MySQL) and vectors to a vector database (Qdrant) — two non-transactional distributed data stores. To prevent partial failure inconsistencies:
+> 1. Django writes the file record in a `PENDING` state first.
+> 2. The worker picks up the job and transitions it to `PROCESSING` before generating embeddings.
+> 3. The record is updated to `SUCCESS` (setting the chunk count) **only after** Qdrant confirms successful storage of the vectors.
+> 4. Any failure during transcription, extraction, or vector storage transitions the record to `FAILED`, storing the raw error message.
+> 5. A periodic reconciliation Celery task runs to identify and mark `FAILED` any records stuck in a transition state (`PENDING` or `PROCESSING`) for longer than 30 minutes.
+>
+> **Multi-Tenant Data Isolation Architecture (Tradeoffs):**
+> When building multi-tenant RAG applications, two major patterns are used for database level isolation:
+> 1. **Collection-per-Tenant**: Provisioning a separate Qdrant collection for each workspace.
+>    * *Pros*: Strongest security isolation boundaries, zero risk of cross-tenant leakage, easier collection deletion.
+>    * *Cons*: Excessive operational overhead, doesn't scale to thousands of tenants due to hardware/RAM overhead per collection.
+> 2. **Metadata Payload Filtering (Used Here)**: Storing all data in a single collection and filtering search requests using tenant metadata.
+>    * *Pros*: Highly cost-efficient, operates on a single shared index, scales automatically.
+>    * *Cons*: Requires strict validation rules to avoid leaks due to coding bugs.
+> 
+> *Our Implementation*: To address data leakage, Arishem enforces strict workspace filtering at the API layer and the vector database layer via Qdrant's payload index on `metadata.workspace_id`. Furthermore, the system layers role-based context constraints: users with the `viewer` role are dynamically locked to their own uploads via a secondary `metadata.uploaded_by` search filter. Admin and editor roles query across all workspace resources.
 
 ---
 
@@ -906,4 +937,39 @@ To run integration tests against real services, create an `ENV_FILE` repository 
 | Timeout | 30 minutes |
 | Output bucket | `TRANSCRIBE_OUTPUT_BUCKET` env var |
 | Output key prefix | `transcripts/<filename>/` |
+
+---
+
+## Asynchronous Producer-Consumer Ingestion & Backpressure Strategy
+
+To prevent Gunicorn worker thread starvation and database connection exhaustion when executing long-running extraction and transcription tasks (AWS Transcribe jobs can take up to 30 minutes), the ingestion pipeline has been decoupled into a producer-consumer system backed by **Celery + RabbitMQ/Redis**.
+
+### Task Execution State Machine (Dual-Write Eventual Consistency)
+Involving two distributed, non-transactional data stores (MySQL + Qdrant Cloud) introduces eventual consistency concerns:
+1. **PENDING**: The Django API (Producer) inserts an `IngestedFile` metadata row into MySQL with status `PENDING` and immediately triggers the Celery job.
+2. **202 Accepted**: The API immediately returns a `202 Accepted` status with the job details, preventing HTTP request timeouts.
+3. **PROCESSING**: The Celery worker updates the database status to `PROCESSING` when starting text extraction or transcription.
+4. **SUCCESS / FAILED**: Upon successful chunk index writes to Qdrant, status flips to `SUCCESS`. If any extraction, transcription, or embedding step fails, the worker catches the error, sets status to `FAILED`, and logs the error details.
+5. **Periodic Reconciliation**: A Celery cron task triggers every 30 minutes to clean up stale jobs stuck in `PENDING` or `PROCESSING` (reconciling them as `FAILED`).
+
+### Backpressure Control Policy
+If Celery worker nodes fall behind or the task queue backs up, we enforce a strict backpressure control threshold at the API boundary:
+- We track active ingestion queue depth by counting DB rows in `PENDING` or `PROCESSING` states.
+- If queue depth reaches the capacity threshold (`MAX_INGESTION_QUEUE_DEPTH`, default 50), the API automatically rejects new ingestion requests, returning `503 Service Unavailable`.
+- This controls system load, prevents database connection pool exhaustion, and gives horizontal autoscalers (e.g., KEDA based on RabbitMQ queue size) time to spin up additional workers without degrading the database.
+
+---
+
+## Metered API Cost-Control & Dynamic Role Throttling
+
+RAG application queries and ingestion tasks invoke highly metered, expensive external services (AWS Bedrock Titan embeddings, AWS Transcribe, Qdrant Cloud, and Groq Meta Llama 70B inference). Rate limiting is framed as a **financial cost control budget** rather than simple abuse mitigation.
+
+### Dynamic Role Quotas
+We enforce a custom Django REST Framework throttle class `CostControlRoleThrottle` on the query and upload views. Quotas are assigned dynamically according to the user's role:
+- **`admin`**: Capped at 100 req/min to facilitate system setup and bulk ingestion.
+- **`editor`**: Capped at 60 req/min for file uploads.
+- **`viewer`**: Capped at 10 req/min for query actions to prevent runaway token costs from automated scripts.
+
+Additionally, our Out-of-Domain (OOD) query detection serves as a secondary cost control layer, immediately returning a cached rejection if average retrieval confidence falls below `0.35`, entirely skipping the LLM call.
+
 

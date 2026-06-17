@@ -16,3 +16,8 @@ dependencies = [
     "langchain-qdrant>=1.1.0",
     "faster-whisper>=1.2.1",
 ]
+
+[tool.uv.workspace]
+members = [
+    "backend",
+]

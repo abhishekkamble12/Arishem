@@ -7,6 +7,7 @@ import { RegisterPage } from './pages/RegisterPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { UploadPage } from './pages/UploadPage';
 import { ProfilePage } from './pages/ProfilePage';
+import MonitoringPage from './pages/MonitoringPage';
 
 // Authenticated layout containing the header and page content container
 const AuthenticatedLayout: React.FC = () => {
@@ -37,6 +38,7 @@ export const App: React.FC = () => {
             {/* Editor & Admin only upload page */}
             <Route element={<ProtectedRoute allowedRoles={['admin', 'editor']} />}>
               <Route path="/upload" element={<UploadPage />} />
+              <Route path="/monitoring" element={<MonitoringPage />} />
             </Route>
           </Route>
         </Route>

@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { LogOut, Database, Upload, User as UserIcon, MessageSquare } from 'lucide-react';
+import { LogOut, Database, Upload, User as UserIcon, MessageSquare, BarChart2 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
-  const { user, clearAuth } = useAuthStore();
+  const { user, clearAuth, activeWorkspaceId, setActiveWorkspaceId } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -70,6 +70,20 @@ export const Navbar: React.FC = () => {
             </Link>
           )}
 
+          {user && (user.role === 'admin' || user.role === 'editor') && (
+            <Link
+              to="/monitoring"
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                isActive('/monitoring')
+                  ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20'
+                  : 'text-dark-400 hover:text-dark-100 hover:bg-dark-800/30'
+              }`}
+            >
+              <BarChart2 className="w-4 h-4" />
+              <span>Monitoring</span>
+            </Link>
+          )}
+
           <Link
             to="/profile"
             className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
@@ -86,6 +100,24 @@ export const Navbar: React.FC = () => {
         {/* User Stats and Logout */}
         {user && (
           <div className="flex items-center space-x-4">
+            {/* Workspace Selector Dropdown */}
+            {user.workspaces && user.workspaces.length > 0 && (
+              <div className="flex items-center space-x-2 bg-dark-900/40 border border-dark-800/40 rounded-xl px-3 py-1.5 mr-2">
+                <span className="text-xs text-dark-400 font-medium">Workspace:</span>
+                <select
+                  value={activeWorkspaceId || ''}
+                  onChange={(e) => setActiveWorkspaceId(parseInt(e.target.value, 10))}
+                  className="bg-transparent text-xs font-semibold text-brand-400 focus:outline-none cursor-pointer select-none"
+                >
+                  {user.workspaces.map((ws) => (
+                    <option key={ws.id} value={ws.id} className="bg-dark-950 text-dark-100">
+                      {ws.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="hidden sm:flex flex-col items-end text-right">
               <span className="text-sm font-semibold text-dark-100">{user.username}</span>
               <div className="flex items-center space-x-2 mt-0.5">

@@ -19,6 +19,7 @@ boto3>=1.35.0
 langchain-aws==0.2.14
 langchain-community==0.3.19
 langchain-text-splitters==0.3.8
+langchain-groq==0.2.0
 langchain-qdrant==0.2.0
 
 # Vector DB client
@@ -28,3 +29,8 @@ qdrant-client==1.13.3
 pymupdf==1.25.3
 docx2txt==0.8
 unstructured[pptx]==0.17.2
+
+# Background workers & queue broker
+celery==5.4.0
+redis==5.0.8
+

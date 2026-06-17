@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { aiApi, IngestedFile, QueryResponse } from '../api/ai';
+import { useAuthStore } from './authStore';
 
 export interface ChatMessage {
   id: string;
@@ -69,9 +70,18 @@ export const useChatStore = create<ChatState>((set, get) => {
       // Add user message
       get().addMessage({ role: 'user', content: question });
       
+      const workspaceId = useAuthStore.getState().activeWorkspaceId;
+      if (!workspaceId) {
+        get().addMessage({
+          role: 'assistant',
+          content: '⚠️ Error: No active workspace selected.',
+        });
+        return;
+      }
+
       set({ isQuerying: true, error: null });
       try {
-        const response: QueryResponse = await aiApi.query(question, topK);
+        const response: QueryResponse = await aiApi.query(question, workspaceId, topK);
         
         // Add Claude response
         get().addMessage({
@@ -94,9 +104,15 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     fetchFiles: async () => {
+      const workspaceId = useAuthStore.getState().activeWorkspaceId;
+      if (!workspaceId) {
+        set({ files: [], isFetchingFiles: false });
+        return;
+      }
+
       set({ isFetchingFiles: true });
       try {
-        const response = await aiApi.listFiles();
+        const response = await aiApi.listFiles(workspaceId);
         set({ files: response.files, error: null });
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || 'Failed to retrieve ingested files';

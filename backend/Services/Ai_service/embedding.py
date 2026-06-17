@@ -134,13 +134,37 @@ def ensure_collection_exists() -> None:
     else:
         logger.debug("Collection '%s' already exists and matches configuration", QDRANT_COLLECTION)
 
+    # Ensure payload index on metadata.workspace_id exists
+    try:
+        client.create_payload_index(
+            collection_name=QDRANT_COLLECTION,
+            field_name="metadata.workspace_id",
+            field_schema="integer",
+        )
+        logger.info("Ensured payload index on 'metadata.workspace_id' exists")
+    except Exception as e:
+        logger.warning("Failed to create payload index on 'metadata.workspace_id': %s", e)
 
-def embed_and_store(chunks: List[Document]) -> int:
+    # Ensure payload index on metadata.uploaded_by exists
+    try:
+        client.create_payload_index(
+            collection_name=QDRANT_COLLECTION,
+            field_name="metadata.uploaded_by",
+            field_schema="keyword",
+        )
+        logger.info("Ensured payload index on 'metadata.uploaded_by' exists")
+    except Exception as e:
+        logger.warning("Failed to create payload index on 'metadata.uploaded_by': %s", e)
+
+
+def embed_and_store(chunks: List[Document], workspace_id: int, uploaded_by: str = None) -> int:
     """
     Embed a list of Document chunks and upsert them into Qdrant.
 
     Args:
         chunks: List of LangChain Documents (typically from Extractor.extract_and_chunk).
+        workspace_id: The ID of the workspace these chunks belong to.
+        uploaded_by: The email address of the user who uploaded these documents.
 
     Returns:
         Number of chunks stored.
@@ -152,9 +176,14 @@ def embed_and_store(chunks: List[Document]) -> int:
     if not chunks:
         raise ValueError("embed_and_store received an empty chunk list — nothing to store.")
 
+    for chunk in chunks:
+        chunk.metadata["workspace_id"] = workspace_id
+        if uploaded_by:
+            chunk.metadata["uploaded_by"] = uploaded_by
+
     ensure_collection_exists()
 
-    logger.info("Embedding and storing %d chunks into '%s'…", len(chunks), QDRANT_COLLECTION)
+    logger.info("Embedding and storing %d chunks into '%s' (workspace: %d, uploader: %s)…", len(chunks), QDRANT_COLLECTION, workspace_id, uploaded_by)
 
     QdrantVectorStore.from_documents(
         documents=chunks,

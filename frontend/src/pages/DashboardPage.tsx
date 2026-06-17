@@ -13,7 +13,7 @@ export const DashboardPage: React.FC = () => {
     fileSearchQuery, selectedSourceFilter, askQuestion, fetchFiles,
     setFileSearchQuery, setSelectedSourceFilter, clearHistory
   } = useChatStore();
-  const { user } = useAuthStore();
+  const { user, activeWorkspaceId } = useAuthStore();
 
   const [question, setQuestion] = useState('');
   const [activeTab, setActiveTab] = useState<'chat' | 'files'>('chat');
@@ -28,7 +28,7 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     fetchFiles();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,7 +251,7 @@ export const DashboardPage: React.FC = () => {
               <input
                 type="text"
                 disabled={isQuerying}
-                placeholder={files.length === 0 ? 'Upload documents first to start querying...' : 'Ask Claude about your ingested documents...'}
+                placeholder={files.filter(f => !f.status || f.status === 'SUCCESS').length === 0 ? 'Upload and ingest documents first to start querying...' : 'Ask Claude about your ingested documents...'}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 className="w-full bg-dark-900/60 border border-dark-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-dark-100 placeholder-dark-500 pl-4 pr-12 py-3.5 rounded-xl text-sm focus:outline-none transition-all duration-200"
@@ -264,9 +264,9 @@ export const DashboardPage: React.FC = () => {
                 <Send className="w-4 h-4" />
               </button>
             </div>
-            {files.length === 0 && (
+            {files.filter(f => !f.status || f.status === 'SUCCESS').length === 0 && (
               <p className="text-[10px] text-amber-500/80 text-center mt-2">
-                ⚠️ No documents ingested yet. Use the Upload page to add files.
+                ⚠️ No successfully ingested documents yet. Use the Upload page to add files and wait for completion.
               </p>
             )}
           </form>
@@ -367,6 +367,16 @@ export const DashboardPage: React.FC = () => {
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        {file.status && file.status !== 'SUCCESS' && (
+                          <span className={`text-[9px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded border flex items-center gap-1 ${
+                            file.status === 'PENDING' ? 'bg-slate-500/10 text-slate-400 border-slate-500/20' :
+                            file.status === 'PROCESSING' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse' :
+                            'bg-red-500/10 text-red-400 border-red-500/20'
+                          }`}>
+                            {file.status === 'PROCESSING' && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                            {file.status}
+                          </span>
+                        )}
                         <span className={`text-[9px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded border ${getFileTypeBadgeClass(file.file_type)}`}>
                           {file.file_type}
                         </span>
@@ -386,6 +396,12 @@ export const DashboardPage: React.FC = () => {
                     <p className="text-[10px] text-dark-500 break-all leading-tight">
                       s3://{file.s3_key}
                     </p>
+
+                    {file.status === 'FAILED' && file.error_message && (
+                      <p className="text-[10px] text-red-400 bg-red-500/5 p-2 rounded border border-red-500/10 leading-normal">
+                        <strong>Error:</strong> {file.error_message}
+                      </p>
+                    )}
 
                     <div className="pt-2 border-t border-dark-800/40 grid grid-cols-2 gap-2 text-[10px] text-dark-400">
                       <div>
