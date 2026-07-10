@@ -1,7 +1,6 @@
 # Arishem Backend
 
 A production-ready **Retrieval-Augmented Generation (RAG) API** built with Django REST Framework. Upload documents and media files from AWS S3, embed them into a Qdrant vector store using Amazon Bedrock, and query them with natural language — all behind a JWT-secured, role-based API.
-
 * **Hybrid AI Engine**: Initially built using **AWS Bedrock (Claude 3.5 Sonnet)**, the query inference engine was migrated to **Groq (Meta Llama 3.3 70B)** to reduce token latency to sub-second speeds and significantly cut inference costs. Vector embeddings remain generated via AWS Bedrock Titan.
 * **Asynchronous Ingestion**: Media transcribing (AWS Transcribe) and document extractions are offloaded to **Celery** background tasks to prevent thread starvation and timeouts.
 
