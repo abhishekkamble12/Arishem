@@ -100,7 +100,7 @@ Client                  API                    Celery               AWS Services
   │                     ├─ Enqueue job ────────▶│                        │                     │
   │                     │                       │                        │                     │
   │  202 Accepted ◀─────┤ (return immediately) │                        │                     │
-  │  {job_id: "..."}    │                       ��                        │                     │
+  │  {job_id: "..."}    │                       │                        │                     │
   │                     │                       │                        │                     │
   │                     │                       ├─ Download from S3 ────▶│                     │
   │                     │                       │                        │                     │
