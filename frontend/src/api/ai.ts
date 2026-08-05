@@ -27,6 +27,10 @@ export interface QueryResponse {
   answer: string;
   sources: string[];
   chunks: number;
+  citations?: { source: string; snippet: string }[];
+  unverified?: string;
+  confidence?: number;
+  llm_confidence?: number;
 }
 
 export interface UploadResponse {

@@ -7,7 +7,7 @@ from .models import IngestedFile, Workspace
 from decouple import config
 
 logger = logging.getLogger(__name__)
-S3_BUCKET = config("S3_BUCKET")
+OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET")
 
 @shared_task(bind=True)
 def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_id: int):
@@ -29,7 +29,7 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
 
     try:
         # 1. Extraction & Chunking
-        chunks = extract_and_chunk(bucket_name=S3_BUCKET, s3_key=s3_key)
+        chunks = extract_and_chunk(bucket_name=OBJECT_STORAGE_BUCKET, s3_key=s3_key)
         if not chunks:
             raise ValueError("No text could be extracted from the file")
 

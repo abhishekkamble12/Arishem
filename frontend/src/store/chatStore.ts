@@ -8,6 +8,9 @@ export interface ChatMessage {
   content: string;
   sources?: string[];
   chunks?: number;
+  citations?: { source: string; snippet: string }[];
+  unverified?: string;
+  llm_confidence?: number;
   timestamp: string;
 }
 
@@ -89,6 +92,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           content: response.answer,
           sources: response.sources,
           chunks: response.chunks,
+          citations: response.citations,
+          unverified: response.unverified,
+          llm_confidence: response.llm_confidence,
         });
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || 'Failed to query the AI agent';

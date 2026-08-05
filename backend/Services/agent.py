@@ -66,7 +66,18 @@ Rules:
 - Only use information from the context below.
 - If the answer is not in the context, say "I don't have enough information to answer that."
 - Always cite the source document (filename) when you use information from it.
-- Be concise and direct."""
+- Be concise and direct.
+
+You MUST respond in valid JSON format matching this schema:
+{
+  "answer": "The concise answer...",
+  "citations": [
+    {"source": "filename.pdf", "snippet": "exact quote from text"}
+  ],
+  "unverified": "What I could not verify or what is missing...",
+  "confidence_score": 0.95
+}
+"""
 
 
 def _build_prompt(question: str, chunks: list[Document]) -> list:
@@ -172,7 +183,27 @@ def query(question: str, workspace_id: int, top_k: int = TOP_K, user_email: str 
     # 2. Build prompt and call Claude
     messages = _build_prompt(question, chunks)
     response = _get_llm().invoke(messages)
-    answer = response.content
+    
+    import json
+    try:
+        # Extract JSON if the LLM wrapped it in markdown code blocks
+        raw_content = response.content.strip()
+        if raw_content.startswith("```json"):
+            raw_content = raw_content[7:]
+        if raw_content.startswith("```"):
+            raw_content = raw_content[3:]
+        if raw_content.endswith("```"):
+            raw_content = raw_content[:-3]
+            
+        parsed_answer = json.loads(raw_content.strip())
+    except json.JSONDecodeError:
+        logger.error("Failed to parse JSON from LLM: %s", response.content)
+        parsed_answer = {
+            "answer": response.content,
+            "citations": [],
+            "unverified": "",
+            "confidence_score": avg_score
+        }
 
     # 3. Collect unique sources
     sources = list({doc.metadata.get("source", "unknown") for doc in chunks})
@@ -180,8 +211,11 @@ def query(question: str, workspace_id: int, top_k: int = TOP_K, user_email: str 
     logger.info("Query answered. Sources: %s", sources)
 
     return {
-        "answer": answer,
+        "answer": parsed_answer.get("answer", ""),
         "sources": sources,
+        "citations": parsed_answer.get("citations", []),
+        "unverified": parsed_answer.get("unverified", ""),
         "chunks": len(chunks),
         "confidence": avg_score,
+        "llm_confidence": parsed_answer.get("confidence_score", avg_score)
     }

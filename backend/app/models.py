@@ -73,10 +73,32 @@ class IngestedFile(models.Model):
         OGG  = "ogg",  "OGG Audio"
         M4A  = "m4a",  "M4A Audio"
 
-    # ── FIX: these two fields were missing from the model ────────────────────
-    s3_bucket      = models.CharField(max_length=255)
-    # 500 chars keeps us well under MySQL's 3072-byte unique-index limit (utf8mb4 = 4 bytes/char)
-    s3_key         = models.CharField(max_length=500)
+    # Object storage fields
+    object_bucket  = models.CharField(max_length=255)
+    object_key     = models.CharField(max_length=500)
+
+    # Document metadata fields
+    title          = models.CharField(max_length=255, blank=True, null=True)
+    original_filename = models.CharField(max_length=500, blank=True, null=True)
+    document_category = models.CharField(
+        max_length=20,
+        choices=[
+            ('policy', 'Policy'),
+            ('sop', 'SOP'),
+            ('contract', 'Contract'),
+            ('audit', 'Audit'),
+            ('hr', 'HR'),
+            ('legal', 'Legal'),
+            ('training', 'Training'),
+            ('meeting', 'Meeting'),
+            ('finance', 'Finance'),
+            ('other', 'Other')
+        ],
+        default='other'
+    )
+    summary        = models.TextField(blank=True, null=True)
+    detected_topics = models.JSONField(blank=True, null=True, default=dict)
+    last_indexed_timestamp = models.DateTimeField(blank=True, null=True)
 
     file_type      = models.CharField(max_length=10, choices=FileType.choices)
     chunks_stored  = models.PositiveIntegerField(default=0)
@@ -108,11 +130,11 @@ class IngestedFile(models.Model):
     )
 
     class Meta:
-        unique_together = ("s3_bucket", "s3_key")
+        unique_together = ("object_bucket", "object_key")
         ordering = ["-ingested_at"]
 
     def __str__(self):
-        return f"{self.s3_key} ({self.file_type}) — {self.chunks_stored} chunks"
+        return f"{self.object_key} ({self.file_type}) — {self.chunks_stored} chunks"
 
 
 # ── AI Observability & Monitoring ─────────────────────────────────────────────

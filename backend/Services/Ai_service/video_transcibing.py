@@ -14,9 +14,9 @@ Supported input formats (AWS Transcribe accepts all of these):
 
 Environment variables required (set in .env):
     AWS_REGION              — e.g. us-east-1
-    S3_BUCKET               — bucket where videos are stored
-    TRANSCRIBE_OUTPUT_BUCKET — bucket where Transcribe writes its JSON output
-                               (can be the same as S3_BUCKET)
+    OBJECT_STORAGE_BUCKET               — bucket where videos are stored
+    TRANSCRIBE_OUTPUT_BUCKET — bucket where JSON transcripts go
+                               (can be the same as OBJECT_STORAGE_BUCKET)
 """
 
 import json
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 AWS_REGION = config("AWS_REGION", default="us-east-1")
-TRANSCRIBE_OUTPUT_BUCKET = config("TRANSCRIBE_OUTPUT_BUCKET", default=config("S3_BUCKET"))
+TRANSCRIBE_OUTPUT_BUCKET = config("TRANSCRIBE_OUTPUT_BUCKET", default=config("OBJECT_STORAGE_BUCKET"))
 
 SUPPORTED_MEDIA_EXTENSIONS = {
     ".mp4", ".mov", ".avi", ".mkv",   # video

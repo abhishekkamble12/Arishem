@@ -1,0 +1,6 @@
+Arishem Technologies SOP-104: Data Retention Policy
+Effective Date: January 1, 2026
+1. Introduction: This SOP outlines the data retention requirements for all employee logs and API prediction metrics.
+2. Retention Period: All API prediction logs stored in the PredictionLog table must be retained for exactly 90 days. After 90 days, logs must be automatically purged.
+3. Exception: Under critical security audits, the compliance officer (compliance@arishem.com) may request an extension of retention up to 180 days.
+4. Audits: External audits will be conducted quarterly by the internal auditing team.

@@ -20,9 +20,10 @@ import time
 from datetime import timedelta
 from pathlib import PurePosixPath
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 from decouple import config
+from Services.aws_storage import upload_file_to_s3
+from .utils import resolve_workspace
+from .metrics_service import log_prediction_and_check_drift, get_workspace_monitoring_stats
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, parser_classes, throttle_classes
@@ -49,17 +50,11 @@ from .serializers import RegisterSerializer, UserSerializer, WorkspaceSerializer
 
 logger        = logging.getLogger(__name__)
 User          = get_user_model()
-S3_BUCKET     = config("S3_BUCKET")
+OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET")
 AWS_REGION    = config("AWS_REGION", default="us-east-1")
 ALL_SUPPORTED = sorted(DOC_EXTENSIONS | SUPPORTED_MEDIA_EXTENSIONS)
 
-# Lazy S3 client singleton
-_s3 = None
-def _get_s3():
-    global _s3
-    if _s3 is None:
-        _s3 = boto3.client("s3", region_name=AWS_REGION)
-    return _s3
+# S3 client and logic moved to Services.aws_storage
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -162,7 +157,7 @@ def _run_ingestion(s3_key: str, user, workspace_id: int) -> Response:
             status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
         )
 
-    if IngestedFile.objects.filter(s3_bucket=S3_BUCKET, s3_key=s3_key).exists():
+    if IngestedFile.objects.filter(object_bucket=OBJECT_STORAGE_BUCKET, object_key=s3_key).exists():
         return Response(
             {"error": f"'{s3_key}' has already been ingested or is in progress. Delete it first to re-ingest."},
             status=status.HTTP_409_CONFLICT,
@@ -184,8 +179,8 @@ def _run_ingestion(s3_key: str, user, workspace_id: int) -> Response:
 
     # Create the IngestedFile record in database in PENDING status (Dual-write consistency step 1)
     file_obj = IngestedFile.objects.create(
-        s3_bucket      = S3_BUCKET,
-        s3_key         = s3_key,
+        object_bucket  = OBJECT_STORAGE_BUCKET,
+        object_key     = s3_key,
         file_type      = ext.lstrip("."),
         chunks_stored  = 0,
         uploaded_by    = user,
@@ -207,7 +202,7 @@ def _run_ingestion(s3_key: str, user, workspace_id: int) -> Response:
             "task_id": task.id,
             "file": {
                 "id": file_obj.id,
-                "s3_key": file_obj.s3_key,
+                "s3_key": file_obj.object_key,
                 "file_type": file_obj.file_type,
                 "status": file_obj.status,
                 "chunks_stored": file_obj.chunks_stored,
@@ -235,12 +230,9 @@ def store_vectordb(request):
     if not s3_key:
         return Response({"error": "s3_key is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    workspace_id = request.data.get("workspace_id")
-    if not workspace_id:
-        first_ws = request.user.workspaces.first()
-        if not first_ws:
-            return Response({"error": "No workspace available."}, status=status.HTTP_400_BAD_REQUEST)
-        workspace_id = first_ws.id
+    workspace_id, error_response = resolve_workspace(request, request.data)
+    if error_response:
+        return error_response
 
     return _run_ingestion(s3_key, request.user, workspace_id)
 
@@ -278,21 +270,13 @@ def upload_direct(request):
     s3_key = f"uploads/{original_name}"
 
     # Upload to S3
-    try:
-        s3 = _get_s3()
-        s3.upload_fileobj(file_obj, S3_BUCKET, s3_key)
-        logger.info("Uploaded '%s' to s3://%s/%s", original_name, S3_BUCKET, s3_key)
-    except (ClientError, BotoCoreError) as e:
-        logger.exception("S3 upload failed for '%s'", original_name)
-        return Response({"error": f"S3 upload failed: {str(e)}"}, status=status.HTTP_502_BAD_GATEWAY)
+    if not upload_file_to_s3(file_obj, s3_key):
+        return Response({"error": f"S3 upload failed for {original_name}"}, status=status.HTTP_502_BAD_GATEWAY)
 
     # Now ingest from S3
-    workspace_id = request.data.get("workspace_id")
-    if not workspace_id:
-        first_ws = request.user.workspaces.first()
-        if not first_ws:
-            return Response({"error": "No workspace available."}, status=status.HTTP_400_BAD_REQUEST)
-        workspace_id = first_ws.id
+    workspace_id, error_response = resolve_workspace(request, request.data)
+    if error_response:
+        return error_response
 
     return _run_ingestion(s3_key, request.user, workspace_id)
 
@@ -312,20 +296,9 @@ def query_vectordb(request):
     if not question:
         return Response({"error": "question is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    workspace_id = request.data.get("workspace_id")
-    if not workspace_id:
-        first_ws = request.user.workspaces.first()
-        if not first_ws:
-            return Response({"error": "No workspace available."}, status=status.HTTP_400_BAD_REQUEST)
-        workspace_id = first_ws.id
-    else:
-        try:
-            workspace_id = int(workspace_id)
-        except (ValueError, TypeError):
-            return Response({"error": "workspace_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not request.user.workspaces.filter(id=workspace_id).exists():
-            return Response({"error": "Workspace not found or access denied"}, status=status.HTTP_403_FORBIDDEN)
+    workspace_id, error_response = resolve_workspace(request, request.data)
+    if error_response:
+        return error_response
 
     kwargs = {}
     top_k = request.data.get("top_k")
@@ -352,41 +325,16 @@ def query_vectordb(request):
     
     response_time_ms = int((time.time() - start_time) * 1000)
 
-    # Log prediction
-    confidence = result.get("confidence") if result else None
-    prediction_text = result.get("answer") if result else ""
+    # Log prediction and check drift via metrics_service
     user = request.user if request.user.is_authenticated else None
-
-    PredictionLog.objects.create(
+    log_prediction_and_check_drift(
         workspace_id=workspace_id,
         user=user,
-        input_text=question,
-        prediction_text=prediction_text,
+        question=question,
+        result=result,
         response_time_ms=response_time_ms,
-        confidence=confidence,
-        error_msg=error_msg,
+        error_msg=error_msg
     )
-
-    # Simple Drift Check & Email Alert (e.g. run every 50 queries)
-    # Get last 50 queries for this workspace
-    recent_logs = list(PredictionLog.objects.filter(workspace_id=workspace_id, confidence__isnull=False).order_by('-id')[:50])
-    if len(recent_logs) >= 50:
-        avg_confidence = sum(log.confidence for log in recent_logs) / 50.0
-        # Assume drift if avg confidence drops below 0.35 (just an arbitrary threshold for the assignment)
-        if avg_confidence < 0.35:
-            # Check if we already logged drift recently
-            recent_drift = DriftLog.objects.filter(workspace_id=workspace_id, timestamp__gte=timezone.now() - timedelta(hours=1)).exists()
-            if not recent_drift:
-                DriftLog.objects.create(
-                    workspace_id=workspace_id,
-                    drift_score=avg_confidence,
-                    is_drift_detected=True,
-                    reference_count=50,
-                    current_count=50,
-                )
-                workspace = Workspace.objects.get(id=workspace_id)
-                admin_emails = list(workspace.members.filter(groups__name="admin").values_list("email", flat=True))
-                send_drift_alert(workspace.name, avg_confidence, admin_emails)
 
     if error_msg:
         return Response({"error": f"Query failed: {error_msg}"}, status=status.HTTP_502_BAD_GATEWAY)
@@ -405,24 +353,16 @@ def list_files(request):
     GET /app/ai/files — list all ingested files.
     Query params: workspace_id=1
     """
-    workspace_id = request.query_params.get("workspace_id")
-    if not workspace_id:
-        first_ws = request.user.workspaces.first()
-        if not first_ws:
+    workspace_id, error_response = resolve_workspace(request, request.query_params)
+    if error_response:
+        # Special case: original list_files returns empty array instead of error when no workspace exists
+        if error_response.status_code == 400 and error_response.data.get("error") == "No workspace available.":
             return Response({"files": [], "total": 0}, status=status.HTTP_200_OK)
-        workspace_id = first_ws.id
-    else:
-        try:
-            workspace_id = int(workspace_id)
-        except (ValueError, TypeError):
-            return Response({"error": "workspace_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not request.user.workspaces.filter(id=workspace_id).exists():
-            return Response({"error": "Workspace not found or access denied"}, status=status.HTTP_403_FORBIDDEN)
+        return error_response
 
     files = list(
         IngestedFile.objects.filter(workspace_id=workspace_id).values(
-            "id", "s3_key", "file_type", "chunks_stored", "status", "error_message", "ingested_at", "uploaded_by__email"
+            "id", "object_key", "file_type", "chunks_stored", "status", "error_message", "ingested_at", "uploaded_by__email"
         )
     )
     return Response({"files": files, "total": len(files)}, status=status.HTTP_200_OK)
@@ -446,7 +386,7 @@ def delete_file(request):
         return Response({"error": "s3_key is required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        file_obj = IngestedFile.objects.get(s3_bucket=S3_BUCKET, s3_key=s3_key)
+        file_obj = IngestedFile.objects.get(object_bucket=OBJECT_STORAGE_BUCKET, object_key=s3_key)
     except IngestedFile.DoesNotExist:
         return Response({"error": f"'{s3_key}' not found in ingested files"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -505,58 +445,12 @@ def get_monitoring_stats(request):
     Query params: workspace_id=1
     Returns aggregated metrics for the dashboard.
     """
-    workspace_id = request.query_params.get("workspace_id")
-    if not workspace_id:
-        first_ws = request.user.workspaces.first()
-        if not first_ws:
-            return Response({"error": "No workspace available."}, status=status.HTTP_400_BAD_REQUEST)
-        workspace_id = first_ws.id
-    else:
-        try:
-            workspace_id = int(workspace_id)
-        except (ValueError, TypeError):
-            return Response({"error": "workspace_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+    workspace_id, error_response = resolve_workspace(request, request.query_params)
+    if error_response:
+        return error_response
 
-        if not request.user.workspaces.filter(id=workspace_id).exists():
-            return Response({"error": "Workspace not found or access denied"}, status=status.HTTP_403_FORBIDDEN)
-
-    predictions = PredictionLog.objects.filter(workspace_id=workspace_id)
-    total_predictions = predictions.count()
-    error_count = predictions.filter(error_msg__isnull=False).count()
-    avg_latency = predictions.aggregate(Avg("response_time_ms"))["response_time_ms__avg"] or 0
-    avg_confidence = predictions.aggregate(Avg("confidence"))["confidence__avg"] or 0
-
-    # Predictions per day (last 7 days)
-    seven_days_ago = timezone.now() - timedelta(days=7)
-    recent_predictions = predictions.filter(timestamp__gte=seven_days_ago)
-    
-    # We'll group manually to avoid DB-specific datetime truncation issues
-    per_day_counts = {}
-    for i in range(7):
-        d = (timezone.now() - timedelta(days=i)).date()
-        per_day_counts[d.isoformat()] = 0
-        
-    for p in recent_predictions:
-        d_str = p.timestamp.date().isoformat()
-        if d_str in per_day_counts:
-            per_day_counts[d_str] += 1
-
-    chart_data = [{"date": k, "count": v} for k, v in sorted(per_day_counts.items())]
-
-    recent_drifts = list(
-        DriftLog.objects.filter(workspace_id=workspace_id)
-        .order_by("-timestamp")
-        .values("id", "drift_score", "timestamp")[:5]
-    )
-
-    return Response({
-        "total_predictions": total_predictions,
-        "error_count": error_count,
-        "avg_latency": round(avg_latency, 2),
-        "avg_confidence": round(avg_confidence, 4),
-        "chart_data": chart_data,
-        "recent_drifts": recent_drifts,
-    }, status=status.HTTP_200_OK)
+    stats = get_workspace_monitoring_stats(workspace_id)
+    return Response(stats, status=status.HTTP_200_OK)
 
 
 

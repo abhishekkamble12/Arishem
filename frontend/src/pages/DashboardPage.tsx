@@ -202,26 +202,76 @@ export const DashboardPage: React.FC = () => {
                           </button>
                         </div>
                       )}
-                      {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
-                        <div className="mt-4 pt-3.5 border-t border-dark-800/60 space-y-2">
-                          <span className="text-[10px] uppercase font-bold text-brand-400 tracking-wider">
-                            Sources cited ({msg.chunks || msg.sources.length} chunks):
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {msg.sources.map((src, i) => (
-                              <button
-                                key={i}
-                                onClick={() => { setSelectedSourceFilter(src); setActiveTab('files'); }}
-                                className={`text-[10px] px-2 py-1 rounded border flex items-center space-x-1.5 transition-all ${selectedSourceFilter === src
-                                    ? 'bg-brand-500 text-white border-brand-400'
-                                    : 'bg-dark-900/60 text-dark-300 border-dark-800 hover:bg-dark-800/40 hover:text-white'
-                                  }`}
-                              >
-                                <FileText className="w-3 h-3 flex-shrink-0" />
-                                <span className="truncate max-w-[150px]">{getFileBasename(src)}</span>
-                              </button>
-                            ))}
-                          </div>
+                      {msg.role === 'assistant' && (
+                        <div className="mt-4 space-y-4">
+                          {msg.citations && msg.citations.length > 0 ? (
+                            <div className="pt-3.5 border-t border-dark-800/60 space-y-2">
+                              <span className="text-[10px] uppercase font-bold text-brand-400 tracking-wider">
+                                Sources & Evidence ({msg.citations.length} citations)
+                              </span>
+                              <div className="flex flex-col gap-2">
+                                {msg.citations.map((cite, i) => (
+                                  <div key={i} className="bg-dark-900/60 p-2.5 rounded-lg border border-dark-800">
+                                    <button
+                                      onClick={() => { setSelectedSourceFilter(cite.source); setActiveTab('files'); }}
+                                      className={`text-[10px] mb-1.5 px-2 py-1 rounded border flex items-center space-x-1.5 transition-all w-max ${selectedSourceFilter === cite.source
+                                          ? 'bg-brand-500 text-white border-brand-400'
+                                          : 'bg-dark-800/40 text-brand-300 border-dark-700 hover:bg-dark-700/50 hover:text-white'
+                                        }`}
+                                    >
+                                      <FileText className="w-3 h-3 flex-shrink-0" />
+                                      <span className="truncate max-w-[150px]">{getFileBasename(cite.source)}</span>
+                                    </button>
+                                    <p className="text-xs text-dark-300 border-l-2 border-brand-500/30 pl-2 italic">"{cite.snippet}"</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : msg.sources && msg.sources.length > 0 && (
+                            <div className="pt-3.5 border-t border-dark-800/60 space-y-2">
+                              <span className="text-[10px] uppercase font-bold text-brand-400 tracking-wider">
+                                Sources cited ({msg.chunks || msg.sources.length} chunks):
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {msg.sources.map((src, i) => (
+                                  <button
+                                    key={i}
+                                    onClick={() => { setSelectedSourceFilter(src); setActiveTab('files'); }}
+                                    className={`text-[10px] px-2 py-1 rounded border flex items-center space-x-1.5 transition-all ${selectedSourceFilter === src
+                                        ? 'bg-brand-500 text-white border-brand-400'
+                                        : 'bg-dark-900/60 text-dark-300 border-dark-800 hover:bg-dark-800/40 hover:text-white'
+                                      }`}
+                                  >
+                                    <FileText className="w-3 h-3 flex-shrink-0" />
+                                    <span className="truncate max-w-[150px]">{getFileBasename(src)}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {msg.unverified && (
+                            <div className="pt-2 border-t border-dark-800/60 space-y-1">
+                              <span className="text-[10px] uppercase font-bold text-amber-500 tracking-wider flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500/50"></span> Missing / Unverified Information
+                              </span>
+                              <p className="text-xs text-amber-400/80 bg-amber-500/5 p-2 rounded border border-amber-500/10">
+                                {msg.unverified}
+                              </p>
+                            </div>
+                          )}
+
+                          {msg.llm_confidence !== undefined && (
+                            <div className="flex justify-end pt-1">
+                              <span className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${
+                                msg.llm_confidence >= 0.8 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+                                msg.llm_confidence >= 0.5 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
+                                'bg-red-500/10 text-red-400 border-red-500/20'
+                              }`}>
+                                Confidence: {Math.round(msg.llm_confidence * 100)}%
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

@@ -1,0 +1,37 @@
+==================================================
+      ARISHEM REAL RAG PIPELINE BENCHMARK        
+==================================================
+Using Groq Model ID: llama-3.3-70b-versatile
+Using AWS Region for Bedrock: us-east-1
+Setting Confidence Threshold override to: 0.30
+--------------------------------------------------
+
+[Phase 1] Embedding and storing compliance policy...
+   [+] Ingestion successful. Latency: 2222 ms
+
+[Phase 2] Executing RAG queries and gathering metrics...
+
+Running Q1: 'What is the retention period for API prediction logs according to SOP-104?'
+   Status: Success
+   Latency: 1949 ms
+   Confidence Score: 0.7258
+   Answer: 90 days
+   Citations: [{'source': 'SOP-104_Data_Retention_Policy.pdf', 'snippet': 'All API prediction logs stored in the PredictionLog table must be retained for exactly 90 days.'}]
+
+Running Q2: 'Who can request an extension of retention under SOP-104?'
+   Status: Success
+   Latency: 914 ms
+   Confidence Score: 0.3707
+   Answer: The compliance officer (compliance@arishem.com)
+   Citations: [{'source': 'SOP-104_Data_Retention_Policy.pdf', 'snippet': 'the compliance officer (compliance@arishem.com) may request an extension of retention up to 180 days'}]
+
+Running Q3: 'Are we compliant with HIPAA regulations?'
+   Status: Success
+   Latency: 625 ms
+   Confidence Score: 0.0986
+   Answer: I don't have enough relevant context in the uploaded documents to answer your question confidently.
+   Citations: None
+
+==================================================
+                  BENCHMARK COMPLETE              
+==================================================
