@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
+from . import auth_social_views
 
 urlpatterns = [
     # ── Auth ──────────────────────────────────────────────────────────────
@@ -9,6 +10,9 @@ urlpatterns = [
     path("auth/token/refresh",  TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me",             views.me,                  name="auth_me"),
     path("auth/workspaces",     views.list_workspaces,     name="list_workspaces"),
+    path("auth/google",         auth_social_views.google_login, name="google_login"),
+    path("auth/github",         auth_social_views.github_login, name="github_login"),
+
 
     # ── AI pipeline ───────────────────────────────────────────────────────
     path("ai/upload",           views.store_vectordb,      name="store_vectordb"),

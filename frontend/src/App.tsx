@@ -8,6 +8,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { UploadPage } from './pages/UploadPage';
 import { ProfilePage } from './pages/ProfilePage';
 import MonitoringPage from './pages/MonitoringPage';
+import { GithubCallbackPage } from './pages/GithubCallbackPage';
 
 // Authenticated layout containing the header and page content container
 const AuthenticatedLayout: React.FC = () => {
@@ -28,6 +29,7 @@ export const App: React.FC = () => {
         {/* Public auth pages */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/auth/github/callback" element={<GithubCallbackPage />} />
 
         {/* Protected app pages */}
         <Route element={<ProtectedRoute />}>

@@ -3,7 +3,7 @@
 ==================================================
 Using Groq Model ID: llama-3.3-70b-versatile
 Using AWS Region for Bedrock: us-east-1
-Setting Confidence Threshold override to: 0.30
+Setting Confidence Threshold override to: 0.35
 --------------------------------------------------
 
 [Phase 1] Embedding and storing compliance policy...

@@ -1,0 +1,122 @@
+[
+  {
+    "question": "What is the retention period for API prediction logs according to SOP-104?",
+    "ground_truth": "API prediction logs must be retained for exactly 90 days."
+  },
+  {
+    "question": "Who has the authority to request an extension of the data retention period?",
+    "ground_truth": "The compliance officer (compliance@arishem.com) can request an extension."
+  },
+  {
+    "question": "What is the maximum duration for a data retention extension under SOP-104?",
+    "ground_truth": "The maximum extension is up to 180 days."
+  },
+  {
+    "question": "How often are external audits conducted according to SOP-104?",
+    "ground_truth": "External audits are conducted quarterly."
+  },
+  {
+    "question": "Who conducts the external audits mentioned in SOP-104?",
+    "ground_truth": "The internal auditing team conducts the external audits."
+  },
+  {
+    "question": "When did the SOP-104 Data Retention Policy become effective?",
+    "ground_truth": "It became effective on January 1, 2026."
+  },
+  {
+    "question": "How many days of paid time off do full-time employees get?",
+    "ground_truth": "Full-time employees are entitled to 20 days of paid time off per calendar year."
+  },
+  {
+    "question": "How many PTO days can be carried over to the following year?",
+    "ground_truth": "Up to 5 days of PTO can be carried over to the next year."
+  },
+  {
+    "question": "What is the requirement for consecutive sick leaves exceeding 3 days?",
+    "ground_truth": "A doctor's note is required."
+  },
+  {
+    "question": "How many days of sick leave are provided annually?",
+    "ground_truth": "Employees are provided 10 days of paid sick leave annually."
+  },
+  {
+    "question": "What is the duration of Arishem's parental leave?",
+    "ground_truth": "Arishem offers 12 weeks of fully paid parental leave."
+  },
+  {
+    "question": "Under what circumstances is parental leave granted?",
+    "ground_truth": "For the birth or adoption of a child."
+  },
+  {
+    "question": "How much bereavement leave is granted for the death of an immediate family member?",
+    "ground_truth": "Up to 3 days of paid leave is granted."
+  },
+  {
+    "question": "How far in advance must PTO be requested?",
+    "ground_truth": "PTO must be requested at least 2 weeks in advance."
+  },
+  {
+    "question": "Who needs to approve a PTO request?",
+    "ground_truth": "The direct manager."
+  },
+  {
+    "question": "Which system must be used to request PTO?",
+    "ground_truth": "The HR portal."
+  },
+  {
+    "question": "When did the Employee Leave Policy become effective?",
+    "ground_truth": "March 15, 2025."
+  },
+  {
+    "question": "How do I request access to the arishem-dev AWS account?",
+    "ground_truth": "Via Okta."
+  },
+  {
+    "question": "What version of Python is required for development at Arishem?",
+    "ground_truth": "Python 3.10+ is required."
+  },
+  {
+    "question": "Which tool is used for dependency management in the engineering team?",
+    "ground_truth": "uv is used for dependency management."
+  },
+  {
+    "question": "Where should I add my generated SSH key?",
+    "ground_truth": "To your GitHub profile."
+  },
+  {
+    "question": "What database does the backend use in production?",
+    "ground_truth": "PostgreSQL."
+  },
+  {
+    "question": "Which vector store does Arishem use?",
+    "ground_truth": "Qdrant."
+  },
+  {
+    "question": "What is the naming convention for a new feature branch?",
+    "ground_truth": "feature/XYZ-123-short-desc."
+  },
+  {
+    "question": "How many approvals are required before merging a PR to main?",
+    "ground_truth": "At least one approving review from a code owner."
+  },
+  {
+    "question": "When do production deployments happen?",
+    "ground_truth": "Every Tuesday and Thursday at 10 AM PST."
+  },
+  {
+    "question": "What happens when code is merged to main?",
+    "ground_truth": "It deploys to staging automatically."
+  },
+  {
+    "question": "Who should be contacted for urgent deployment issues?",
+    "ground_truth": "Tag @sre-oncall in the #eng-incidents Slack channel."
+  },
+  {
+    "question": "Are we compliant with HIPAA regulations?",
+    "ground_truth": "I don't have enough information to answer that."
+  },
+  {
+    "question": "What is the capital of France?",
+    "ground_truth": "I don't have enough information to answer that."
+  }
+]

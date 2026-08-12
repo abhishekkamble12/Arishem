@@ -23,7 +23,7 @@ langchain-groq==0.2.0
 langchain-qdrant==0.2.0
 
 # Vector DB client
-qdrant-client==1.13.3
+qdrant-client>=1.14.0
 
 # Document loaders
 pymupdf==1.25.3
@@ -34,3 +34,14 @@ unstructured[pptx]==0.17.2
 celery==5.4.0
 redis==5.0.8
 
+# Local AI Models
+sentence-transformers>=3.0.1
+faster-whisper>=1.2.1
+
+# Social Auth
+google-auth==2.35.0
+requests==2.32.3
+
+# Evaluation
+ragas
+datasets

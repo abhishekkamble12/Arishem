@@ -93,13 +93,13 @@ TEMPLATES = [
 WSGI_APPLICATION = "backend.wsgi.application"
 
 # ── Database (AWS RDS MySQL in production, SQLite in CI) ──────────────────────
-_db_engine = config("DB_ENGINE", default="django.db.backends.mysql")
+_db_engine = config("DB_ENGINE", default="django.db.backends.sqlite3")
 
 if _db_engine == "django.db.backends.sqlite3":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": config("DB_NAME", default=":memory:"),
+            "NAME": config("DB_NAME", default=BASE_DIR / "db.sqlite3"),
         }
     }
 else:

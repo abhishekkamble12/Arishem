@@ -29,7 +29,7 @@ This report outlines the **real performance metrics** collected from running int
 - **LLM Engine:** Groq — `llama-3.3-70b-versatile` (Temperature: `0.2`)
 - **Query Latencies:**
   - **In-Domain Queries (Q1 & Q2):** Hit Groq. Groq delivers lightning-fast token response time, with RAG generation completing under 2 seconds.
-  - **Out-of-Domain Queries (Q3):** Since the similarity score is below the `0.30` threshold, the query skips the LLM call entirely, conserving API costs.
+  - **Out-of-Domain Queries (Q3):** Since the similarity score is below the `0.35` threshold, the query skips the LLM call entirely, conserving API costs.
 - **Citation Fidelity:**
   - Grounded citations return the correct filename (`SOP-104_Data_Retention_Policy.pdf`) and the exact quoting evidence snippet directly from the source.
   

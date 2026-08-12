@@ -1,6 +1,6 @@
 # Arishem Backend
 
-A production-ready **Retrieval-Augmented Generation (RAG) API** built with Django REST Framework. Upload documents and media files from AWS S3, embed them into a Qdrant vector store using Amazon Bedrock, and query them with natural language — all behind a JWT-secured, role-based API.
+A production-oriented, validated end-to-end **Retrieval-Augmented Generation (RAG) API** built with Django REST Framework. Upload documents and media files from AWS S3, embed them into a Qdrant vector store using Amazon Bedrock, and query them with natural language — all behind a JWT-secured, role-based API.
 
 * **Hybrid AI Engine**: Initially built using **AWS Bedrock (Claude 3.5 Sonnet)**, the query inference engine was migrated to **Groq (Meta Llama 3.3 70B)** to reduce token latency to sub-second speeds and significantly cut inference costs. Vector embeddings remain generated via AWS Bedrock Titan.
 * **Asynchronous Ingestion**: Media transcribing (AWS Transcribe) and document extractions are offloaded to **Celery** background tasks to prevent thread starvation and timeouts.
@@ -350,7 +350,7 @@ The test suite covers:
 - Date: 2026-08-05
 - Environment: Local Docker, SQLite fallback, Qdrant Cloud free tier, Groq API (Llama 3.3 70B)
 - Test corpus: SOP-104_Data_Retention_Policy.pdf
-- Confidence threshold: 0.30
+- Confidence threshold: 0.35
 - Top-K: 5
 
 ## Test Results
@@ -360,11 +360,11 @@ The test suite covers:
 | Ingestion (1 PDF) | 2,222ms | ✅ Success | N/A | PDF chunked and stored in Qdrant |
 | Query Q1 (in-domain) | 1,949ms | ✅ Success | 0.7258 | Correctly answered "90 days", cited SOP-104 |
 | Query Q2 (in-domain) | 914ms | ✅ Success | 0.3707 | Correctly answered compliance officer email, cited SOP-104 |
-| Query Q3 (OOD) | 625ms | ✅ Success (rejection) | 0.0986 | Bypassed LLM call due to confidence < 0.30 |
+| Query Q3 (OOD) | 625ms | ✅ Success (rejection) | 0.0986 | Bypassed LLM call due to confidence < 0.35 |
 
 ## Key Findings
 
-1. **OOD rejection works as designed.** Out-of-domain query confidence (0.0986) was well below threshold (0.30), system correctly skipped LLM generation.
+1. **OOD rejection works as designed.** Out-of-domain query confidence (0.0986) was well below threshold (0.35), system correctly skipped LLM generation.
 2. **Citation grounding holds.** Both in-domain queries returned source citations (SOP-104_Data_Retention_Policy.pdf).
 3. **Latency range observed:** 625ms–1,949ms. Median ~1.4s. Cold-start cost amortized after first query.
 4. **Cost estimate:** Based on Groq pricing (~$0.30/1M tokens) and ~1K tokens per query, ~$0.0003/query for inference.

@@ -1,22 +1,8 @@
-"""
-Embedding + Qdrant storage layer.
-
-Uses Amazon Bedrock Titan Embeddings (v2) for vectors and Qdrant Cloud as
-the vector store.  All credentials come from environment variables — nothing
-is hardcoded here.
-
-Environment variables required (set in .env):
-    QDRANT_URL          — Qdrant Cloud cluster URL
-    QDRANT_API_KEY      — Qdrant Cloud API key
-    QDRANT_COLLECTION   — collection name (default: "documents")
-    AWS_REGION          — AWS region for Bedrock (default: "us-east-1")
-"""
-
 import logging
 from typing import List
 
 from decouple import config
-from langchain_aws import BedrockEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
@@ -28,32 +14,27 @@ logger = logging.getLogger(__name__)
 # Config from environment
 # ---------------------------------------------------------------------------
 QDRANT_URL = config("QDRANT_URL")
-QDRANT_API_KEY = config("QDRANT_API_KEY")
+QDRANT_API_KEY = config("QDRANT_API_KEY", default="")
 QDRANT_COLLECTION = config("QDRANT_COLLECTION", default="documents")
-AWS_REGION = config("AWS_REGION", default="us-east-1")
 
-# Titan Embed Text v2 produces 1024-dimensional vectors.
-# If you switch models, update this constant.
-EMBEDDING_DIMENSION = 1024
+# all-MiniLM-L6-v2 produces 384-dimensional vectors.
+EMBEDDING_DIMENSION = 384
 
 # ---------------------------------------------------------------------------
 # Singletons — created once per process
 # ---------------------------------------------------------------------------
-_embeddings: BedrockEmbeddings | None = None
+_embeddings: HuggingFaceEmbeddings | None = None
 _qdrant_client: QdrantClient | None = None
 
 
-def get_embeddings() -> BedrockEmbeddings:
-    """Lazy singleton for the Bedrock embedding model."""
+def get_embeddings() -> HuggingFaceEmbeddings:
+    """Lazy singleton for the local embedding model."""
     global _embeddings
     if _embeddings is None:
-        _embeddings = BedrockEmbeddings(
-            model_id="amazon.titan-embed-text-v2:0",
-            region_name=AWS_REGION,
-            # boto3 picks up AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from env,
-            # or uses the attached IAM role in production — no hardcoding needed.
+        _embeddings = HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2"
         )
-        logger.info("BedrockEmbeddings initialised (model: titan-embed-text-v2:0)")
+        logger.info("HuggingFaceEmbeddings initialised (model: all-MiniLM-L6-v2)")
     return _embeddings
 
 

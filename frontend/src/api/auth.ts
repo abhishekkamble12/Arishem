@@ -42,4 +42,14 @@ export const authApi = {
     const response = await apiClient.get<User>('/auth/me');
     return response.data;
   },
+
+  googleLogin: async (token: string): Promise<AuthResponse> => {
+    const response = await apiClient.post<AuthResponse>('/auth/google', { token });
+    return response.data;
+  },
+
+  githubLogin: async (code: string): Promise<AuthResponse> => {
+    const response = await apiClient.post<AuthResponse>('/auth/github', { code });
+    return response.data;
+  },
 };

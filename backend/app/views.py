@@ -360,11 +360,16 @@ def list_files(request):
             return Response({"files": [], "total": 0}, status=status.HTTP_200_OK)
         return error_response
 
-    files = list(
+    raw_files = list(
         IngestedFile.objects.filter(workspace_id=workspace_id).values(
             "id", "object_key", "file_type", "chunks_stored", "status", "error_message", "ingested_at", "uploaded_by__email"
         )
     )
+    files = []
+    for f in raw_files:
+        item = dict(f)
+        item["s3_key"] = f["object_key"]
+        files.append(item)
     return Response({"files": files, "total": len(files)}, status=status.HTTP_200_OK)
 
 

@@ -7,11 +7,6 @@ import dotenv
 # Load environment variables
 dotenv.load_dotenv("backend/.env")
 
-# Map OBJECT_STORAGE keys to AWS keys for Bedrock to use
-os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get("OBJECT_STORAGE_ACCESS_KEY_ID", "")
-os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get("OBJECT_STORAGE_SECRET_ACCESS_KEY", "")
-os.environ["AWS_REGION"] = os.environ.get("OBJECT_STORAGE_REGION", "us-east-1")
-
 # Add current directory to path so we can import Services
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -23,8 +18,8 @@ from langchain_qdrant import QdrantVectorStore
 import Services.Ai_service.embedding as embedding_mod
 import Services.agent as agent_mod
 
-# Adjust the confidence threshold to 0.30 so Q2 passes to the LLM
-agent_mod.CONFIDENCE_THRESHOLD = 0.30
+# Adjust the confidence threshold to 0.35 so Q2 passes to the LLM
+agent_mod.CONFIDENCE_THRESHOLD = 0.35
 
 # 1. Initialize local in-memory Qdrant
 local_client = QdrantClient(location=":memory:")
@@ -48,7 +43,7 @@ def main():
     print("==================================================")
     print("Using Groq Model ID:", os.environ.get("GROQ_MODEL_ID", "llama-3.3-70b-versatile"))
     print("Using AWS Region for Bedrock:", os.environ.get("AWS_REGION"))
-    print("Setting Confidence Threshold override to: 0.30")
+    print("Setting Confidence Threshold override to: 0.35")
     print("--------------------------------------------------")
 
     metrics = []
@@ -77,7 +72,7 @@ def main():
         collection_name="documents",
         vectors_config={
             "content-dense": VectorParams(
-                size=1024, # titan-embed-text-v2 dimension
+                size=384, # all-MiniLM-L6-v2 dimension
                 distance=Distance.COSINE,
             )
         },
@@ -232,7 +227,7 @@ This report outlines the **real performance metrics** collected from running int
 - **LLM Engine:** Groq — `llama-3.3-70b-versatile` (Temperature: `0.2`)
 - **Query Latencies:**
   - **In-Domain Queries (Q1 & Q2):** Hit Groq. Groq delivers lightning-fast token response time, with RAG generation completing under 2 seconds.
-  - **Out-of-Domain Queries (Q3):** Since the similarity score is below the `0.30` threshold, the query skips the LLM call entirely, conserving API costs.
+  - **Out-of-Domain Queries (Q3):** Since the similarity score is below the `0.35` threshold, the query skips the LLM call entirely, conserving API costs.
 - **Citation Fidelity:**
   - Grounded citations return the correct filename (`SOP-104_Data_Retention_Policy.pdf`) and the exact quoting evidence snippet directly from the source.
   
