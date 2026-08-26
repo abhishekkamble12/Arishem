@@ -13,6 +13,18 @@
 
 > **High-throughput, low-latency, multi-tenant Retrieval-Augmented Generation (RAG) backend** engineered with Django REST Framework, Celery asynchronous processing, AWS Bedrock embeddings, Qdrant Cloud vector search, and Groq Meta Llama 3.3 70B inference. Built with out-of-domain (OOD) confidence filtering, eventual consistency dual-write protection, AI observability telemetry, and a quantitative RAGAS evaluation harness.
 
+<p align="center">
+  <img src="docs/assets/query_view.png" alt="Arishem RAG Chat & Grounded Query Interface" width="800">
+</p>
+
+### ⚡ 3-Step Production Workflow
+
+| Step | Operation | Technical Execution | UI Preview |
+|---|---|---|---|
+| **1. Upload & Ingest** | Document / Media Ingestion | Offloaded to Celery background workers; PyMuPDF/Docx2txt extraction, Bedrock Titan v2 embedding, and Qdrant storage | ![Upload Pipeline](docs/assets/upload_pipeline.png) |
+| **2. Observability & Drift** | Live Quality Tracking | Real-time `PredictionLog` telemetry, sliding-window confidence scoring, and automated drift alerting | ![Monitoring Dashboard](docs/assets/monitoring_dashboard.png) |
+| **3. Grounded Query** | Semantic Retrieval & Inference | Filtered vector search ($Top\text{-}K=5$), $<0.35$ OOD rejection, and Groq Llama 3.3 70B grounding with cited JSON | ![Query View](docs/assets/query_view.png) |
+
 ---
 
 ## 🎯 Executive Summary & Performance Highlights
@@ -33,6 +45,10 @@
 ## 📊 Quantitative Evaluation & Benchmarks (RAGAS)
 
 Arishem includes an automated evaluation harness ([`evals/run_eval.py`](evals/run_eval.py)) powered by `ragas` using Groq LLM-as-a-judge against a 30-pair golden evaluation dataset ([`evals/golden_set.json`](evals/golden_set.json)) spanning multi-format documents (PDFs, Markdown, raw text).
+
+<p align="center">
+  <img src="docs/assets/eval_scorecard.png" alt="RAGAS Evaluation Scorecard" width="750">
+</p>
 
 ### RAGAS Metric Scorecard
 
