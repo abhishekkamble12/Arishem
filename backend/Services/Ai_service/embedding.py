@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Config from environment
 # ---------------------------------------------------------------------------
-QDRANT_URL = config("QDRANT_URL")
+QDRANT_URL = config("QDRANT_URL", default="http://localhost:6333")
 QDRANT_API_KEY = config("QDRANT_API_KEY", default="")
 QDRANT_COLLECTION = config("QDRANT_COLLECTION", default="documents")
 

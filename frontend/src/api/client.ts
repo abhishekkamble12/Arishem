@@ -4,6 +4,28 @@ import { useAuthStore } from '../store/authStore';
 // Access backend API base URL. Adjust if your Django runs on a different port.
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/app';
 
+// --- Toast event bus (no external dependency) ---
+export interface ToastEvent {
+  type: 'warning' | 'error' | 'success';
+  message: string;
+}
+type ToastListener = (event: ToastEvent) => void;
+const toastListeners: ToastListener[] = [];
+
+/** Subscribe to toast events. Returns an unsubscribe function. */
+export const onToast = (listener: ToastListener): (() => void) => {
+  toastListeners.push(listener);
+  return () => {
+    const idx = toastListeners.indexOf(listener);
+    if (idx > -1) toastListeners.splice(idx, 1);
+  };
+};
+
+/** Publish a toast event to all current subscribers. */
+export const emitToast = (event: ToastEvent): void => {
+  toastListeners.forEach((l) => l(event));
+};
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -47,6 +69,17 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config;
     if (!originalRequest) return Promise.reject(error);
+
+    // Handle 429 rate limit - emit toast
+    if (error.response?.status === 429) {
+      emitToast({ type: 'warning', message: 'Rate limit reached — please wait a moment before retrying.' });
+      return Promise.reject(error);
+    }
+
+    // Handle 503 service unavailable - propagate for caller to handle
+    if (error.response?.status === 503) {
+      return Promise.reject(error);
+    }
 
     // If 401 Unauthorized and not already retried
     const isUnauthorized = error.response?.status === 401;

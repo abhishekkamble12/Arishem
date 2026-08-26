@@ -1,5 +1,15 @@
 import { apiClient } from './client';
 
+export interface ReasoningStep {
+  phase: 'decomposition' | 'retrieval' | 'synthesis' | 'self_critique' | 'retry_synthesis';
+  is_complex?: boolean;
+  sub_queries?: string[];
+  total_unique_chunks?: number;
+  llm_call?: number;
+  verdict?: string;
+  unsupported_claims?: string[];
+}
+
 export interface IngestedFile {
   id: number;
   s3_key: string;
@@ -31,6 +41,18 @@ export interface QueryResponse {
   unverified?: string;
   confidence?: number;
   llm_confidence?: number;
+  agentic_mode: boolean;
+  reasoning_steps: ReasoningStep[];
+  critique_verdict: string;
+}
+
+export function normaliseQueryResponse(raw: QueryResponse): QueryResponse {
+  return {
+    ...raw,
+    agentic_mode: raw.agentic_mode ?? false,
+    reasoning_steps: raw.reasoning_steps ?? [],
+    critique_verdict: raw.critique_verdict ?? 'SKIPPED',
+  };
 }
 
 export interface UploadResponse {
@@ -91,4 +113,27 @@ export const aiApi = {
     });
     return response.data;
   },
+
+  ingestYoutube: async (url: string, workspaceId: number): Promise<{ message: string; file_id: number; chunks_stored: number }> => {
+    const response = await apiClient.post('/ai/meetings/ingest-youtube', {
+      url,
+      workspace_id: workspaceId,
+    });
+    return response.data;
+  },
+
+  getMeetingAnalysis: async (fileId: number): Promise<{
+    file_id: number;
+    title: string;
+    summary: string;
+    action_items: string[];
+    key_decisions: string[];
+    open_questions: string[];
+    full_transcript: string;
+    created_at: string;
+  }> => {
+    const response = await apiClient.get(`/ai/meetings/${fileId}/analysis`);
+    return response.data;
+  },
 };
+

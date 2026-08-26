@@ -175,3 +175,36 @@ class DriftLog(models.Model):
 
     def __str__(self):
         return f"Drift {self.id} | Score: {self.drift_score}"
+
+
+# ── Meeting Intelligence ──────────────────────────────────────────────────────
+
+class MeetingAnalysis(models.Model):
+    """
+    Stores structured outputs extracted from meeting recordings or transcripts:
+    - Executive summary
+    - Action items
+    - Key decisions
+    - Open questions
+    - Generated meeting title
+    """
+    file = models.OneToOneField(
+        IngestedFile,
+        on_delete=models.CASCADE,
+        related_name="meeting_analysis"
+    )
+    title = models.CharField(max_length=255, blank=True, null=True)
+    summary = models.TextField(blank=True, null=True)
+    action_items = models.JSONField(default=list, blank=True)
+    key_decisions = models.JSONField(default=list, blank=True)
+    open_questions = models.JSONField(default=list, blank=True)
+    full_transcript = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Meeting Analysis for File #{self.file_id}: {self.title or self.file.original_filename}"
+

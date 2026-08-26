@@ -50,7 +50,7 @@ from .serializers import RegisterSerializer, UserSerializer, WorkspaceSerializer
 
 logger        = logging.getLogger(__name__)
 User          = get_user_model()
-OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET")
+OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET", default=config("S3_BUCKET", default="arishem-documents"))
 AWS_REGION    = config("AWS_REGION", default="us-east-1")
 ALL_SUPPORTED = sorted(DOC_EXTENSIONS | SUPPORTED_MEDIA_EXTENSIONS)
 
@@ -456,6 +456,124 @@ def get_monitoring_stats(request):
 
     stats = get_workspace_monitoring_stats(workspace_id)
     return Response(stats, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MEETING INTELLIGENCE — YouTube Ingestion & Analysis Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(["POST"])
+@permission_classes([IsAdminOrEditor])
+def ingest_youtube(request):
+    """
+    POST /app/ai/meetings/ingest-youtube
+    Body: { "url": "https://www.youtube.com/watch?v=...", "workspace_id": 1 }
+    Downloads YouTube audio, transcribes with local Whisper, embeds to Qdrant,
+    and runs meeting intelligence analysis.
+    """
+    url = request.data.get("url", "").strip()
+    if not url or not ("youtube.com" in url or "youtu.be" in url):
+        return Response(
+            {"error": "Valid YouTube URL is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    workspace_id, error_resp = resolve_workspace(request, request.data)
+    if error_resp:
+        return error_resp
+
+    try:
+        workspace = request.user.workspaces.get(id=workspace_id)
+    except Exception:
+        return Response({"error": "Workspace not found or access denied"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        from Services.meeting.audio_processor import download_youtube, convert_to_wav, cleanup_temp_files
+        from Services.meeting.transcriber import transcribe_file
+        from langchain_core.documents import Document
+
+        # 1. Download YouTube audio
+        audio_file = download_youtube(url)
+        wav_file = convert_to_wav(audio_file)
+
+        # 2. Transcribe locally using Whisper
+        logger.info("Transcribing YouTube video from %s", url)
+        transcript = transcribe_file(wav_file)
+
+        # 3. Create document chunks
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+        doc = Document(page_content=transcript, metadata={"source": url, "media_type": "youtube"})
+        chunks = splitter.split_documents([doc])
+
+        # 4. Embed into Qdrant
+        stored = embed_and_store(chunks, workspace.id, uploaded_by=request.user.email)
+
+        # 5. Create IngestedFile DB record
+        video_id = url.split("v=")[-1].split("&")[0] if "v=" in url else "yt_video"
+        file_obj = IngestedFile.objects.create(
+            object_bucket=OBJECT_STORAGE_BUCKET,
+            object_key=f"youtube/{video_id}.mp3",
+            original_filename=f"YouTube_{video_id}",
+            file_type="mp3",
+            document_category="meeting",
+            chunks_stored=stored,
+            uploaded_by=request.user,
+            workspace=workspace,
+            status="SUCCESS",
+        )
+
+        # Cleanup temp audio files
+        cleanup_temp_files(audio_file, wav_file)
+
+        # 6. Trigger meeting analysis Celery task
+        from .tasks import run_meeting_analysis_task
+        run_meeting_analysis_task.delay(file_obj.id, [c.page_content for c in chunks])
+
+        return Response(
+            {
+                "message": "YouTube meeting successfully ingested and analysis queued.",
+                "file_id": file_obj.id,
+                "chunks_stored": stored,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to ingest YouTube video: %s", e)
+        return Response({"error": f"YouTube ingestion failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAnyRole])
+def get_meeting_analysis(request, file_id):
+    """
+    GET /app/ai/meetings/<file_id>/analysis
+    Returns the MeetingAnalysis details for an ingested meeting file.
+    """
+    from .models import MeetingAnalysis
+    try:
+        analysis = MeetingAnalysis.objects.get(file_id=file_id)
+        return Response(
+            {
+                "file_id": file_id,
+                "title": analysis.title,
+                "summary": analysis.summary,
+                "action_items": analysis.action_items,
+                "key_decisions": analysis.key_decisions,
+                "open_questions": analysis.open_questions,
+                "full_transcript": analysis.full_transcript,
+                "created_at": analysis.created_at,
+            },
+            status=status.HTTP_200_OK,
+        )
+    except MeetingAnalysis.DoesNotExist:
+        # If record is not ready yet, return 404 or pending status
+        return Response(
+            {"error": "Meeting analysis is still processing or not found for this file."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
 
 
 

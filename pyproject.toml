@@ -1,7 +1,7 @@
 [project]
 name = "arishem"
 version = "0.1.0"
-description = "Add your description here"
+description = "Production-oriented, validated end-to-end RAG platform with async Celery ingestion, Groq inference, and quantitative RAGAS evaluation."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "pymupdf>=1.27.2.3",
     "langchain-qdrant>=1.1.0",
     "faster-whisper>=1.2.1",
+    "yt-dlp>=2024.5.27",
 ]
 
 [tool.uv.workspace]

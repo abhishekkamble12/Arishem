@@ -1,15 +1,19 @@
-import React, { useState, useRef } from 'react';
-import { aiApi } from '../api/ai';
+import React, { useState, useRef, useEffect } from 'react';
+import { aiApi, IngestedFile } from '../api/ai';
 import { useAuthStore } from '../store/authStore';
-import { Upload, HelpCircle, CheckCircle, AlertCircle, FileText, Film, Loader2, CloudUpload, Link as LinkIcon } from 'lucide-react';
+import { Upload, HelpCircle, CheckCircle, AlertCircle, FileText, Film, Loader2, CloudUpload, Link as LinkIcon, Trash2, RefreshCw } from 'lucide-react';
 
 type UploadMode = 'direct' | 's3key';
 
 const ACCEPTED = '.pdf,.docx,.pptx,.mp4,.mov,.avi,.mkv,.mp3,.wav,.flac,.ogg,.m4a';
 
 export const UploadPage: React.FC = () => {
-  const { activeWorkspaceId } = useAuthStore();
+  const { activeWorkspaceId, user } = useAuthStore();
   const [mode, setMode] = useState<UploadMode>('direct');
+  const [files, setFiles] = useState<IngestedFile[]>([]);
+  const [isFetchingFiles, setIsFetchingFiles] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Direct upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -35,6 +39,35 @@ export const UploadPage: React.FC = () => {
     setUploadStatus('idle');
     setResult(null);
     setErrorMsg(null);
+  };
+
+  const fetchFiles = async () => {
+    if (!activeWorkspaceId) return;
+    setIsFetchingFiles(true);
+    try {
+      const resp = await aiApi.listFiles(activeWorkspaceId);
+      setFiles(resp.files);
+    } catch (err) {
+      // silent fail
+    } finally {
+      setIsFetchingFiles(false);
+    }
+  };
+
+  useEffect(() => { fetchFiles(); }, [activeWorkspaceId]);
+
+  const handleDeleteFile = async (s3Key: string) => {
+    if (!confirm(`Remove "${s3Key.split('/').pop()}" from knowledge base?`)) return;
+    setDeletingKey(s3Key);
+    setDeleteError(null);
+    try {
+      await aiApi.deleteFile(s3Key);
+      await fetchFiles();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.error || 'Delete failed');
+    } finally {
+      setDeletingKey(null);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -75,6 +108,7 @@ export const UploadPage: React.FC = () => {
       });
       setUploadStatus('success');
       clearInputs();
+      fetchFiles();
     } catch (err: any) {
       setUploadStatus('error');
       const code = err.response?.status;
@@ -82,6 +116,7 @@ export const UploadPage: React.FC = () => {
       if (code === 409) text = 'This file has already been ingested. Delete it first to re-ingest.';
       else if (code === 415) text = 'Unsupported file type. See the supported formats list on the right.';
       else if (code === 502) text = 'Failed to reach S3 or Bedrock. Check your AWS credentials and bucket name.';
+      else if (code === 503) text = err.response?.data?.message || 'System busy — ingestion queue is full. Please try again in a moment.';
       setErrorMsg(text);
     } finally {
       setLoading(false);
@@ -159,10 +194,10 @@ export const UploadPage: React.FC = () => {
                   onDrop={handleDrop}
                   onClick={() => fileInputRef.current?.click()}
                   className={`cursor-pointer border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${dragging
-                      ? 'border-brand-500 bg-brand-500/5'
-                      : selectedFile
-                        ? 'border-emerald-500/50 bg-emerald-500/5'
-                        : 'border-dark-700 hover:border-brand-500/50 hover:bg-dark-900/40'
+                    ? 'border-brand-500 bg-brand-500/5'
+                    : selectedFile
+                      ? 'border-emerald-500/50 bg-emerald-500/5'
+                      : 'border-dark-700 hover:border-brand-500/50 hover:bg-dark-900/40'
                     }`}
                 >
                   <input
@@ -255,6 +290,50 @@ export const UploadPage: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Ingested Files List */}
+          <div className="glass-panel rounded-2xl p-6 shadow-md space-y-3">
+            <div className="flex items-center justify-between border-b border-dark-800/60 pb-2">
+              <h3 className="font-bold text-white text-sm">Ingested Files ({files.length})</h3>
+              <button onClick={fetchFiles} disabled={isFetchingFiles} className="p-1.5 text-dark-400 hover:text-brand-400 rounded-lg border border-dark-800 transition-colors">
+                <RefreshCw className={`w-3.5 h-3.5 ${isFetchingFiles ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            {deleteError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-lg">{deleteError}</p>
+            )}
+            {files.length === 0 ? (
+              <p className="text-xs text-dark-500 text-center py-4">No files ingested yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {files.map((file) => {
+                  const s3Key = file.s3_key;
+                  const isDeleting = deletingKey === s3Key;
+                  return (
+                    <div key={file.id} className="flex items-center justify-between bg-dark-900/40 border border-dark-800 rounded-xl px-3 py-2 gap-2">
+                      <div className="truncate">
+                        <p className="text-xs font-medium text-dark-100 truncate">{s3Key.split('/').pop()}</p>
+                        <p className={`text-[10px] mt-0.5 ${file.status === 'SUCCESS' ? 'text-emerald-400' :
+                            file.status === 'FAILED' ? 'text-red-400' :
+                              'text-amber-400'}`
+                        }>{file.status} · {file.chunks_stored} chunks</p>
+                      </div>
+                      {(user?.role === 'editor' || user?.role === 'admin') && (
+                        <button
+                          onClick={() => handleDeleteFile(s3Key)}
+                          disabled={isDeleting}
+                          className="p-1.5 text-dark-500 hover:text-red-400 disabled:opacity-40 flex-shrink-0 rounded-lg hover:bg-red-500/10 transition-colors"
+                          title="Remove from knowledge base"
+                        >
+                          {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Info sidebar */}

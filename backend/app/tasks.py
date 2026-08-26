@@ -7,7 +7,7 @@ from .models import IngestedFile, Workspace
 from decouple import config
 
 logger = logging.getLogger(__name__)
-OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET")
+OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET", default=config("S3_BUCKET", default="arishem-documents"))
 
 @shared_task(bind=True)
 def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_id: int):
@@ -46,6 +46,13 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         ingested_file.status = 'SUCCESS'
         ingested_file.save()
         logger.info("Successfully ingested '%s' via task", s3_key)
+
+        # Trigger meeting intelligence analysis if audio/video or meeting category
+        media_types = ['mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'flac', 'ogg', 'm4a']
+        if ingested_file.file_type in media_types or ingested_file.document_category == 'meeting':
+            logger.info("Queuing meeting analysis task for file #%d", file_id)
+            run_meeting_analysis_task.delay(file_id, [c.page_content for c in chunks])
+
         return f"Ingested {stored} chunks"
 
     except Exception as e:
@@ -54,6 +61,66 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         ingested_file.error_message = str(e)
         ingested_file.save()
         raise e
+
+
+@shared_task
+def run_meeting_analysis_task(file_id: int, chunk_texts: list = None):
+    """
+    Celery task to run meeting intelligence:
+      1. Generates meeting title
+      2. Performs map-reduce summarization
+      3. Extracts action items, key decisions, and open questions
+      4. Saves results in MeetingAnalysis model
+    """
+    from .models import MeetingAnalysis
+    from Services.meeting import (
+        generate_title,
+        summarize,
+        extract_structured_meeting_data,
+    )
+
+    try:
+        ingested_file = IngestedFile.objects.get(id=file_id)
+    except IngestedFile.DoesNotExist:
+        logger.error("Meeting analysis failed: IngestedFile #%d not found", file_id)
+        return
+
+    logger.info("Starting meeting analysis for file #%d (%s)", file_id, ingested_file.original_filename)
+
+    full_transcript = "\n\n".join(chunk_texts) if chunk_texts else ""
+
+    # Generate insights
+    title = generate_title(full_transcript)
+    summary = summarize(full_transcript)
+    
+    # Extract structured data in one LLM call
+    structured_data = extract_structured_meeting_data(full_transcript)
+    action_items = structured_data.get("action_items", [])
+    key_decisions = structured_data.get("key_decisions", [])
+    open_questions = structured_data.get("open_questions", [])
+
+    # Save to MeetingAnalysis model
+    analysis, _ = MeetingAnalysis.objects.update_or_create(
+        file=ingested_file,
+        defaults={
+            "title": title,
+            "summary": summary,
+            "action_items": action_items,
+            "key_decisions": key_decisions,
+            "open_questions": open_questions,
+            "full_transcript": full_transcript,
+        }
+    )
+
+    # Also update IngestedFile metadata
+    ingested_file.title = title
+    ingested_file.summary = summary
+    ingested_file.document_category = 'meeting'
+    ingested_file.save()
+
+    logger.info("Meeting analysis completed for file #%d: '%s'", file_id, title)
+    return f"Analyzed meeting #{file_id}"
+
 
 
 @shared_task

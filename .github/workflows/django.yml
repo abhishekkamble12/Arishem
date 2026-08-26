@@ -35,7 +35,9 @@ jobs:
       AWS_SECRET_ACCESS_KEY: "ci-dummy"
       AWS_REGION: "us-east-1"
       S3_BUCKET: "ci-dummy"
+      OBJECT_STORAGE_BUCKET: "ci-dummy"
       TRANSCRIBE_OUTPUT_BUCKET: "ci-dummy"
+      GROQ_API_KEY: "ci-dummy"
       BEDROCK_MODEL_ID: "anthropic.claude-3-5-sonnet-20241022-v2:0"
       RAG_TOP_K: "5"
 
@@ -66,7 +68,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY=ci-dummy
           AWS_REGION=us-east-1
           S3_BUCKET=ci-dummy
+          OBJECT_STORAGE_BUCKET=ci-dummy
           TRANSCRIBE_OUTPUT_BUCKET=ci-dummy
+          GROQ_API_KEY=ci-dummy
           BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
           RAG_TOP_K=5
           EOF

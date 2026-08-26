@@ -14,7 +14,7 @@ export const RegisterPage: React.FC = () => {
   const [password2, setPassword2] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const { setAuth } = useAuthStore();
+  const { setAuth, refreshWorkspaces } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -43,6 +43,8 @@ export const RegisterPage: React.FC = () => {
       );
       // Log in immediately on success
       setAuth(response.user, response.tokens.access, response.tokens.refresh);
+      // Refresh workspaces from server (non-blocking, errors ignored)
+      refreshWorkspaces().catch(() => { });
       navigate('/');
     } catch (err: any) {
       let errMsg = 'Failed to create account. Please try again.';
@@ -244,6 +246,8 @@ export const RegisterPage: React.FC = () => {
                       setLoading(true);
                       const response = await authApi.googleLogin(credentialResponse.credential);
                       setAuth(response.user, response.tokens.access, response.tokens.refresh);
+                      // Refresh workspaces from server (non-blocking, errors ignored)
+                      refreshWorkspaces().catch(() => { });
                       navigate('/');
                     } catch (err: any) {
                       setError(err.response?.data?.error || 'Google login failed');
@@ -261,7 +265,7 @@ export const RegisterPage: React.FC = () => {
                 size="large"
               />
             </div>
-            
+
             <button
               onClick={() => {
                 const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID;

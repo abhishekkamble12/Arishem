@@ -37,6 +37,7 @@ export default {
       },
       fontFamily: {
         sans: ['Outfit', 'Inter', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out forwards',

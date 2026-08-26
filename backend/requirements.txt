@@ -38,10 +38,11 @@ redis==5.0.8
 sentence-transformers>=3.0.1
 faster-whisper>=1.2.1
 
-# Social Auth
+# Social Auth & HTTP
 google-auth==2.35.0
 requests==2.32.3
+urllib3<2.0.0
 
-# Evaluation
-ragas
-datasets
+# Meeting Intelligence / Audio Processing
+yt-dlp>=2024.11.18
+pydub>=0.25.1

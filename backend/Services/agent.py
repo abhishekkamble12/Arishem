@@ -62,9 +62,9 @@ def _get_llm() -> ChatGroq:
             model=GROQ_MODEL,
             temperature=0.2,
             max_tokens=2048,
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
-        _llm = _llm.bind_tools([fetch_s3_metadata])
-        logger.info("ChatGroq initialised with MCP tools (model: %s)", GROQ_MODEL)
+        logger.info("ChatGroq initialised (model: %s) with JSON mode", GROQ_MODEL)
     return _llm
 
 

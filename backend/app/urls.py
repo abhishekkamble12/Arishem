@@ -22,4 +22,9 @@ urlpatterns = [
     path("ai/files/delete",     views.delete_file,         name="delete_file"),
     path("ai/tasks/<str:task_id>", views.check_task_status, name="check_task_status"),
     path("ai/monitoring",       views.get_monitoring_stats, name="monitoring_stats"),
+
+    # ── Meeting Intelligence ──────────────────────────────────────────────
+    path("ai/meetings/ingest-youtube", views.ingest_youtube, name="ingest_youtube"),
+    path("ai/meetings/<int:file_id>/analysis", views.get_meeting_analysis, name="get_meeting_analysis"),
 ]
+

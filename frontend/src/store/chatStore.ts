@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { aiApi, IngestedFile, QueryResponse } from '../api/ai';
+import { aiApi, IngestedFile, QueryResponse, normaliseQueryResponse } from '../api/ai';
 import { useAuthStore } from './authStore';
 
 export interface ChatMessage {
@@ -10,6 +10,7 @@ export interface ChatMessage {
   chunks?: number;
   citations?: { source: string; snippet: string }[];
   unverified?: string;
+  confidence?: number;
   llm_confidence?: number;
   // Agentic fields
   reasoning_steps?: any[];
@@ -26,7 +27,7 @@ interface ChatState {
   error: string | null;
   fileSearchQuery: string;
   selectedSourceFilter: string | null;
-  
+
   // Actions
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
   clearHistory: () => void;
@@ -76,7 +77,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     askQuestion: async (question: string, topK?: number) => {
       // Add user message
       get().addMessage({ role: 'user', content: question });
-      
+
       const workspaceId = useAuthStore.getState().activeWorkspaceId;
       if (!workspaceId) {
         get().addMessage({
@@ -88,8 +89,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       set({ isQuerying: true, error: null });
       try {
-        const response: QueryResponse = await aiApi.query(question, workspaceId, topK);
-        
+        const raw: QueryResponse = await aiApi.query(question, workspaceId, topK);
+        const response = normaliseQueryResponse(raw);
+
         // Add Claude response
         get().addMessage({
           role: 'assistant',
@@ -98,15 +100,16 @@ export const useChatStore = create<ChatState>((set, get) => {
           chunks: response.chunks,
           citations: response.citations,
           unverified: response.unverified,
+          confidence: response.confidence,
           llm_confidence: response.llm_confidence,
-          reasoning_steps: (response as any).reasoning_steps,
-          critique_verdict: (response as any).critique_verdict,
-          agentic_mode: (response as any).agentic_mode,
+          reasoning_steps: response.reasoning_steps,
+          critique_verdict: response.critique_verdict,
+          agentic_mode: response.agentic_mode,
         });
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || 'Failed to query the AI agent';
         set({ error: errMsg });
-        
+
         get().addMessage({
           role: 'assistant',
           content: `⚠️ Error: ${errMsg}. Please try again.`,
