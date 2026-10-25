@@ -1,113 +1,60 @@
-name: Django CI
+name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main", "upgrade/**"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-  build:
+  backend:
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12"]
-
-    # All env vars are set at the job level so every step can see them.
-    # The .env file creation is a fallback — CI uses these env vars directly.
+    defaults:
+      run:
+        working-directory: backend
     env:
-      DJANGO_SETTINGS_MODULE: backend.settings
-      SECRET_KEY: "ci-test-secret-key-not-used-in-production"
+      # Tests are offline: dummy values only, nothing here is a real credential.
+      SECRET_KEY: ci-only-not-a-secret
       DEBUG: "True"
-      ALLOWED_HOSTS: "localhost,127.0.0.1"
-      DB_ENGINE: "django.db.backends.sqlite3"
-      DB_NAME: ":memory:"
-      DB_USER: ""
-      DB_PASSWORD: ""
-      DB_HOST: ""
-      DB_PORT: ""
-      QDRANT_URL: "http://localhost:6333"
-      QDRANT_API_KEY: "ci-dummy"
-      QDRANT_COLLECTION: "documents"
-      AWS_ACCESS_KEY_ID: "ci-dummy"
-      AWS_SECRET_ACCESS_KEY: "ci-dummy"
-      AWS_REGION: "us-east-1"
-      S3_BUCKET: "ci-dummy"
-      OBJECT_STORAGE_BUCKET: "ci-dummy"
-      TRANSCRIBE_OUTPUT_BUCKET: "ci-dummy"
-      GROQ_API_KEY: "ci-dummy"
-      BEDROCK_MODEL_ID: "anthropic.claude-3-5-sonnet-20241022-v2:0"
-      RAG_TOP_K: "5"
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create .env file
-        # Write the ENV_FILE secret if it exists, otherwise write the CI defaults.
-        # This means CI works even before the secret is configured in GitHub.
-        run: |
-          if [ -n "${{ secrets.ENV_FILE }}" ]; then
-            echo "${{ secrets.ENV_FILE }}" > backend/backend/.env
-          else
-            cat <<'EOF' > backend/backend/.env
-          SECRET_KEY=ci-test-secret-key-not-used-in-production
-          DEBUG=True
-          ALLOWED_HOSTS=localhost,127.0.0.1
-          DB_ENGINE=django.db.backends.sqlite3
-          DB_NAME=:memory:
-          DB_USER=
-          DB_PASSWORD=
-          DB_HOST=
-          DB_PORT=
-          QDRANT_URL=http://localhost:6333
-          QDRANT_API_KEY=ci-dummy
-          QDRANT_COLLECTION=documents
-          AWS_ACCESS_KEY_ID=ci-dummy
-          AWS_SECRET_ACCESS_KEY=ci-dummy
-          AWS_REGION=us-east-1
-          S3_BUCKET=ci-dummy
-          OBJECT_STORAGE_BUCKET=ci-dummy
-          TRANSCRIBE_OUTPUT_BUCKET=ci-dummy
-          GROQ_API_KEY=ci-dummy
-          BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
-          RAG_TOP_K=5
-          EOF
-          fi
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            default-libmysqlclient-dev \
-            pkg-config \
-            gcc
+      - name: Install pinned dependencies (CPU-only torch)
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements-dev.txt
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
+      - name: Lint
+        run: ruff check ..
 
-      - name: Check Django configuration
-        working-directory: backend
-        run: |
-          python manage.py check --deploy 2>&1 || true
-          python manage.py check
+      - name: Django system check
+        run: python manage.py check --settings=backend.test_settings
 
-      - name: Run migrations (SQLite in-memory)
-        working-directory: backend
-        run: |
-          python manage.py migrate --noinput --settings=backend.test_settings
+      - name: Migrations are up to date
+        run: python manage.py makemigrations --check --dry-run --settings=backend.test_settings
 
-      - name: Run Tests
-        working-directory: backend
+      - name: Tests (with coverage)
         run: |
-          python manage.py test --verbosity=2 --settings=backend.test_settings
+          coverage run --source=app,Services --omit="*/migrations/*,*/test*.py" manage.py test --verbosity=1 --settings=backend.test_settings
+          coverage report --skip-empty
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file is valid
+        run: SECRET_KEY=ci docker compose config -q
