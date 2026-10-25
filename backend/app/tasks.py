@@ -1,18 +1,28 @@
 import logging
+
 from celery import shared_task
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.utils import timezone
+from Services.Ai_service.embedding import delete_file_vectors, embed_and_store
 from Services.Extractor import extract_and_chunk
-from Services.Ai_service.embedding import embed_and_store
+
 from .models import IngestedFile, Workspace
-from decouple import config
 
 logger = logging.getLogger(__name__)
-OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET", default=config("S3_BUCKET", default="arishem-documents"))
+OBJECT_STORAGE_BUCKET = settings.OBJECT_STORAGE_BUCKET
+
+MEDIA_TYPES = {"mp4", "mov", "avi", "mkv", "mp3", "wav", "flac", "ogg", "m4a"}
+
 
 @shared_task(bind=True)
 def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_id: int):
     """
     Celery background task for file ingestion (extraction + embedding + storage).
+
+    Idempotent: if the broker redelivers the task, a file that already
+    reached SUCCESS is skipped, and any vectors left over from a previous
+    partial attempt are removed before re-embedding.
     """
     User = get_user_model()
     try:
@@ -23,9 +33,14 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         logger.exception("Failed to load DB models for task")
         return f"Model loading failed: {str(e)}"
 
+    if ingested_file.status == 'SUCCESS':
+        logger.info("File #%d already ingested; skipping duplicate task", file_id)
+        return f"Already ingested ({ingested_file.chunks_stored} chunks)"
+
     # Update status to PROCESSING
     ingested_file.status = 'PROCESSING'
-    ingested_file.save()
+    ingested_file.error_message = None
+    ingested_file.save(update_fields=["status", "error_message"])
 
     try:
         # 1. Extraction & Chunking
@@ -33,23 +48,27 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         if not chunks:
             raise ValueError("No text could be extracted from the file")
 
-        # 2. Embedding & Storage
-        stored = embed_and_store(chunks, workspace.id, uploaded_by=user.email)
+        # Citations should show the name the user uploaded, not the storage key
+        display_name = ingested_file.original_filename or s3_key
+        for chunk in chunks:
+            chunk.metadata["source"] = display_name
+
+        # 2. Embedding & Storage (clear any partial write from an earlier attempt)
+        delete_file_vectors(file_id, workspace.id)
+        stored = embed_and_store(chunks, workspace.id, uploaded_by=user.email, file_id=file_id)
 
         # 3. Update metadata
-        transcribe_job = None
-        if chunks and "job_name" in chunks[0].metadata:
-            transcribe_job = chunks[0].metadata["job_name"]
+        transcribe_job = chunks[0].metadata.get("job_name")
 
         ingested_file.chunks_stored = stored
         ingested_file.transcribe_job = transcribe_job
         ingested_file.status = 'SUCCESS'
+        ingested_file.last_indexed_timestamp = timezone.now()
         ingested_file.save()
         logger.info("Successfully ingested '%s' via task", s3_key)
 
         # Trigger meeting intelligence analysis if audio/video or meeting category
-        media_types = ['mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'flac', 'ogg', 'm4a']
-        if ingested_file.file_type in media_types or ingested_file.document_category == 'meeting':
+        if ingested_file.file_type in MEDIA_TYPES or ingested_file.document_category == 'meeting':
             logger.info("Queuing meeting analysis task for file #%d", file_id)
             run_meeting_analysis_task.delay(file_id, [c.page_content for c in chunks])
 
@@ -59,8 +78,67 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         logger.exception("Background ingestion failed for '%s'", s3_key)
         ingested_file.status = 'FAILED'
         ingested_file.error_message = str(e)
+        ingested_file.save(update_fields=["status", "error_message"])
+        raise
+
+
+@shared_task
+def run_youtube_ingestion_task(url: str, user_id: int, workspace_id: int, file_id: int):
+    """
+    Download a YouTube video's audio, transcribe it locally with Whisper,
+    embed the transcript and queue meeting analysis.
+
+    Runs in a worker because download + transcription can take minutes,
+    far longer than an HTTP request should be held open.
+    """
+    from langchain_core.documents import Document
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from Services.meeting.audio_processor import cleanup_temp_files, convert_to_wav, download_youtube
+    from Services.meeting.transcriber import transcribe_file
+
+    User = get_user_model()
+    try:
+        user = User.objects.get(id=user_id)
+        ingested_file = IngestedFile.objects.get(id=file_id)
+    except Exception as e:
+        logger.exception("Failed to load DB models for YouTube task")
+        return f"Model loading failed: {str(e)}"
+
+    if ingested_file.status == 'SUCCESS':
+        return f"Already ingested ({ingested_file.chunks_stored} chunks)"
+
+    ingested_file.status = 'PROCESSING'
+    ingested_file.save(update_fields=["status"])
+
+    audio_file = wav_file = None
+    try:
+        audio_file = download_youtube(url)
+        wav_file = convert_to_wav(audio_file)
+        transcript = transcribe_file(wav_file)
+
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+        doc = Document(page_content=transcript, metadata={"source": url, "media_type": "youtube"})
+        chunks = splitter.split_documents([doc])
+
+        delete_file_vectors(file_id, workspace_id)
+        stored = embed_and_store(chunks, workspace_id, uploaded_by=user.email, file_id=file_id)
+
+        ingested_file.chunks_stored = stored
+        ingested_file.status = 'SUCCESS'
+        ingested_file.last_indexed_timestamp = timezone.now()
         ingested_file.save()
-        raise e
+
+        run_meeting_analysis_task.delay(file_id, [c.page_content for c in chunks])
+        return f"Ingested {stored} chunks"
+
+    except Exception as e:
+        logger.exception("YouTube ingestion failed for %s", url)
+        ingested_file.status = 'FAILED'
+        ingested_file.error_message = str(e)
+        ingested_file.save(update_fields=["status", "error_message"])
+        raise
+    finally:
+        cleanup_temp_files(audio_file, wav_file)
 
 
 @shared_task
@@ -72,12 +150,13 @@ def run_meeting_analysis_task(file_id: int, chunk_texts: list = None):
       3. Extracts action items, key decisions, and open questions
       4. Saves results in MeetingAnalysis model
     """
-    from .models import MeetingAnalysis
     from Services.meeting import (
+        extract_structured_meeting_data,
         generate_title,
         summarize,
-        extract_structured_meeting_data,
     )
+
+    from .models import MeetingAnalysis
 
     try:
         ingested_file = IngestedFile.objects.get(id=file_id)
@@ -92,7 +171,7 @@ def run_meeting_analysis_task(file_id: int, chunk_texts: list = None):
     # Generate insights
     title = generate_title(full_transcript)
     summary = summarize(full_transcript)
-    
+
     # Extract structured data in one LLM call
     structured_data = extract_structured_meeting_data(full_transcript)
     action_items = structured_data.get("action_items", [])
@@ -129,7 +208,6 @@ def reconcile_stuck_ingestions():
     Reconciliation job to resolve the dual-write consistency problem.
     Finds any file stuck in PENDING/PROCESSING for over 30 minutes and marks it as FAILED.
     """
-    from django.utils import timezone
     from datetime import timedelta
 
     cutoff = timezone.now() - timedelta(minutes=30)

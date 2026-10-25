@@ -21,10 +21,9 @@ import logging
 from typing import Any
 
 from decouple import config
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.documents import Document
-from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_groq import ChatGroq
 
 from .Ai_service.embedding import get_vector_store
 
@@ -33,7 +32,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-AWS_REGION           = config("AWS_REGION", default="us-east-1")
 TOP_K                = int(config("RAG_TOP_K", default=5))
 CONFIDENCE_THRESHOLD = float(config("RAG_CONFIDENCE_THRESHOLD", default=0.35))
 GROQ_MODEL           = config("GROQ_MODEL_ID", default="llama-3.3-70b-versatile")
@@ -45,15 +43,6 @@ SELF_CRITIQUE        = config("SELF_CRITIQUE_ENABLED", default="true").lower() =
 # ---------------------------------------------------------------------------
 _llm: ChatGroq | None = None
 
-
-# ---------------------------------------------------------------------------
-# MCP Tools
-# ---------------------------------------------------------------------------
-@tool
-def fetch_s3_metadata(workspace_id: int, file_key: str) -> str:
-    """Fetch structured metadata from S3 for a given document."""
-    # Dummy MCP integration example allowing the LLM to access live system state
-    return f"Metadata for {file_key}: Uploaded by admin, size 2MB, retention 90 days."
 
 def _get_llm() -> ChatGroq:
     global _llm
@@ -106,6 +95,19 @@ def _build_prompt(question: str, chunks: list[Document]) -> list:
     ]
 
 
+def _confidence(scores: list[float]) -> float:
+    """Mean similarity of the retrieved chunks — the out-of-domain signal."""
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def _low_confidence_response(n_chunks: int, confidence: float, agentic: bool) -> dict[str, Any]:
+    return {
+        "answer": "I don't have enough relevant context in the uploaded documents to answer your question confidently.",
+        "sources": [], "chunks": n_chunks, "confidence": confidence,
+        "agentic_mode": agentic,
+    }
+
+
 def _parse_llm_json(raw_content: str, avg_score: float) -> dict:
     """Parse JSON from LLM response, stripping markdown fences if present."""
     raw = raw_content.strip()
@@ -153,17 +155,13 @@ def _simple_query(
         }
 
     chunks = [doc for doc, score in chunks_with_scores]
-    avg_score = sum(score for _, score in chunks_with_scores) / len(chunks_with_scores)
+    avg_score = _confidence([score for _, score in chunks_with_scores])
 
     logger.info("Retrieved %d chunks (avg score: %.4f)", len(chunks), avg_score)
 
     if avg_score < CONFIDENCE_THRESHOLD:
         logger.warning("Confidence %.4f below threshold %.4f. Rejecting.", avg_score, CONFIDENCE_THRESHOLD)
-        return {
-            "answer": "I don't have enough relevant context in the uploaded documents to answer your question confidently.",
-            "sources": [], "chunks": len(chunks), "confidence": avg_score,
-            "agentic_mode": False,
-        }
+        return _low_confidence_response(len(chunks), avg_score, agentic=False)
 
     messages = _build_prompt(question, chunks)
     response = _get_llm().invoke(messages)
@@ -201,8 +199,8 @@ def _agentic_query(
     from .agentic import (
         decompose_query,
         retrieve_for_subqueries,
-        self_critique,
         retry_synthesis,
+        self_critique,
     )
 
     llm = _get_llm()
@@ -223,7 +221,7 @@ def _agentic_query(
 
     # ── Step 2: Multi-retrieval ──────────────────────────────────────────────
     try:
-        merged_chunks, retrieval_trace = retrieve_for_subqueries(
+        merged_chunks, scores, retrieval_trace = retrieve_for_subqueries(
             sub_queries, vector_store, qdrant_filter, top_k
         )
         reasoning_steps.append({
@@ -242,7 +240,15 @@ def _agentic_query(
             "reasoning_steps": reasoning_steps, "agentic_mode": True,
         }
 
-    avg_score = 0.5  # neutral placeholder for merged pool
+    # Same out-of-domain check as the simple path: skip the LLM entirely
+    # when the merged evidence is too weak to ground an answer.
+    avg_score = _confidence(scores)
+    reasoning_steps[-1]["confidence"] = round(avg_score, 4)
+    if avg_score < CONFIDENCE_THRESHOLD:
+        logger.warning("Agentic confidence %.4f below threshold %.4f. Rejecting.", avg_score, CONFIDENCE_THRESHOLD)
+        response = _low_confidence_response(len(merged_chunks), avg_score, agentic=True)
+        response["reasoning_steps"] = reasoning_steps
+        return response
 
     # ── Step 3: Synthesise ───────────────────────────────────────────────────
     try:
@@ -327,24 +333,17 @@ def query(
         AGENTIC_MODE, question[:80], workspace_id, top_k, user_email, user_role
     )
 
-    # Build shared Qdrant filter
+    # The workspace is the tenant boundary: every member, whatever their
+    # role, can retrieve every document in it. (Roles control who may
+    # upload/delete, not who may read.)
     from qdrant_client.http import models as qdrant_models
 
-    must_conditions = [
+    qdrant_filter = qdrant_models.Filter(must=[
         qdrant_models.FieldCondition(
             key="metadata.workspace_id",
             match=qdrant_models.MatchValue(value=workspace_id)
         )
-    ]
-    if user_role == "viewer" and user_email:
-        must_conditions.append(
-            qdrant_models.FieldCondition(
-                key="metadata.uploaded_by",
-                match=qdrant_models.MatchValue(value=user_email)
-            )
-        )
-
-    qdrant_filter = qdrant_models.Filter(must=must_conditions)
+    ])
     vector_store  = get_vector_store()
 
     # Route to correct pipeline

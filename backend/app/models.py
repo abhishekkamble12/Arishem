@@ -1,6 +1,5 @@
-from django.contrib.auth.models import AbstractUser, Group
+from django.contrib.auth.models import AbstractUser
 from django.db import models
-
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
 # We use Django's built-in Group model as the role carrier.
@@ -63,6 +62,8 @@ class IngestedFile(models.Model):
         PDF  = "pdf",  "PDF"
         DOCX = "docx", "Word Document"
         PPTX = "pptx", "PowerPoint"
+        TXT  = "txt",  "Plain text"
+        MD   = "md",   "Markdown"
         MP4  = "mp4",  "MP4 Video"
         MOV  = "mov",  "MOV Video"
         AVI  = "avi",  "AVI Video"

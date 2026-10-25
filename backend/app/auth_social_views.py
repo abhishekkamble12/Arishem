@@ -1,17 +1,19 @@
 import requests
+from decouple import config
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
-from decouple import config
 
-from .models import ROLE_VIEWER, Workspace
+from .models import Workspace
 from .serializers import UserSerializer
+from .throttling import AuthRateThrottle
 
 User = get_user_model()
 
@@ -21,6 +23,7 @@ GITHUB_SECRET = config("GITHUB_SECRET", default="")
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthRateThrottle])
 def google_login(request):
     """
     POST /auth/google
@@ -35,7 +38,7 @@ def google_login(request):
         email = idinfo.get("email")
         if not email:
             return Response({"error": "No email from Google"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Get or create user
         username = email.split("@")[0]
         user, created = User.objects.get_or_create(
@@ -44,7 +47,7 @@ def google_login(request):
         )
         if created:
             user.set_unusable_password()
-            group, _ = Group.objects.get_or_create(name=ROLE_VIEWER)
+            group, _ = Group.objects.get_or_create(name=settings.SIGNUP_ROLE)
             user.groups.set([group])
             workspace = Workspace.objects.create(name=f"{user.username}'s Workspace")
             workspace.members.add(user)
@@ -71,6 +74,7 @@ def google_login(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthRateThrottle])
 def github_login(request):
     """
     POST /auth/github
@@ -91,11 +95,11 @@ def github_login(request):
         "client_secret": GITHUB_SECRET,
         "code": code,
     }
-    
+
     response = requests.post(token_url, headers=headers, data=data)
     if response.status_code != 200:
         return Response({"error": "Failed to authenticate with GitHub"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
     token_data = response.json()
     access_token = token_data.get("access_token")
     if not access_token:
@@ -105,13 +109,13 @@ def github_login(request):
     emails_url = "https://api.github.com/user/emails"
     headers = {"Authorization": f"Bearer {access_token}"}
     emails_response = requests.get(emails_url, headers=headers)
-    
+
     if emails_response.status_code != 200:
         return Response({"error": "Failed to fetch user emails from GitHub"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
     emails = emails_response.json()
     primary_email = next((email["email"] for email in emails if email["primary"] and email["verified"]), None)
-    
+
     if not primary_email:
         # Fallback to any verified email
         primary_email = next((email["email"] for email in emails if email["verified"]), None)
@@ -127,7 +131,7 @@ def github_login(request):
     )
     if created:
         user.set_unusable_password()
-        group, _ = Group.objects.get_or_create(name=ROLE_VIEWER)
+        group, _ = Group.objects.get_or_create(name=settings.SIGNUP_ROLE)
         user.groups.set([group])
         workspace = Workspace.objects.create(name=f"{user.username}'s Workspace")
         workspace.members.add(user)

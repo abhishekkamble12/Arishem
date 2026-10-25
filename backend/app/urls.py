@@ -1,18 +1,19 @@
+from django.conf import settings
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
+
 from . import views
-from . import auth_social_views
 
 urlpatterns = [
+    path("health",              views.health,              name="health"),
+
     # ── Auth ──────────────────────────────────────────────────────────────
     path("auth/register",       views.register,            name="auth_register"),
     path("auth/login",          views.login,               name="auth_login"),
     path("auth/token/refresh",  TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me",             views.me,                  name="auth_me"),
     path("auth/workspaces",     views.list_workspaces,     name="list_workspaces"),
-    path("auth/google",         auth_social_views.google_login, name="google_login"),
-    path("auth/github",         auth_social_views.github_login, name="github_login"),
-
+    path("auth/users/<int:user_id>/role", views.set_user_role, name="set_user_role"),
 
     # ── AI pipeline ───────────────────────────────────────────────────────
     path("ai/upload",           views.store_vectordb,      name="store_vectordb"),
@@ -22,9 +23,20 @@ urlpatterns = [
     path("ai/files/delete",     views.delete_file,         name="delete_file"),
     path("ai/tasks/<str:task_id>", views.check_task_status, name="check_task_status"),
     path("ai/monitoring",       views.get_monitoring_stats, name="monitoring_stats"),
-
-    # ── Meeting Intelligence ──────────────────────────────────────────────
-    path("ai/meetings/ingest-youtube", views.ingest_youtube, name="ingest_youtube"),
-    path("ai/meetings/<int:file_id>/analysis", views.get_meeting_analysis, name="get_meeting_analysis"),
 ]
 
+# ── Optional: social login (ENABLE_SOCIAL_AUTH) ───────────────────────────
+if settings.ENABLE_SOCIAL_AUTH:
+    from . import auth_social_views
+
+    urlpatterns += [
+        path("auth/google", auth_social_views.google_login, name="google_login"),
+        path("auth/github", auth_social_views.github_login, name="github_login"),
+    ]
+
+# ── Optional: Meeting Intelligence (ENABLE_MEETINGS) ──────────────────────
+if settings.ENABLE_MEETINGS:
+    urlpatterns += [
+        path("ai/meetings/ingest-youtube", views.ingest_youtube, name="ingest_youtube"),
+        path("ai/meetings/<int:file_id>/analysis", views.get_meeting_analysis, name="get_meeting_analysis"),
+    ]

@@ -1,15 +1,13 @@
-import os
 import logging
 from contextlib import contextmanager
 from pathlib import PurePosixPath
-from django.conf import settings
+
+from ..storage import local_copy
 
 logger = logging.getLogger(__name__)
 
 # Supported file types and their temp-file suffixes
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx"}
-
-LOCAL_STORAGE_DIR = os.path.join(settings.BASE_DIR, "local_storage")
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
 
 def _get_extension(s3_key: str) -> str:
@@ -31,34 +29,12 @@ def _get_extension(s3_key: str) -> str:
 @contextmanager
 def download_from_s3(bucket_name: str, s3_key: str):
     """
-    Context manager that yields the local file path from local_storage.
-
-    Supports: .pdf, .docx, .pptx
-
-    Usage:
-        with download_from_s3(bucket, key) as path:
-            docs = Docx2txtLoader(path).load()
-
-    Args:
-        bucket_name: Ignored in local setup.
-        s3_key:      Object key, e.g. "uploads/report.docx"
-
-    Raises:
-        ValueError:                  Unsupported file extension.
-        FileNotFoundError:           Object not found locally.
+    Yield a local path for the stored object (see storage.local_copy).
+    Raises ValueError for unsupported extensions or unsafe keys, and
+    FileNotFoundError if the object is missing. `bucket_name` is kept for
+    call-site compatibility; the bucket comes from settings.
     """
     ext = _get_extension(s3_key)
-    
-    local_path = os.path.join(LOCAL_STORAGE_DIR, s3_key)
-    
-    if not os.path.exists(local_path):
-        logger.error("Local file not found: %s", local_path)
-        raise FileNotFoundError(f"File not found: {local_path}")
-
-    logger.info("Reading local file %s (type: %s)", local_path, ext)
-    
-    try:
-        yield local_path
-    finally:
-        pass # No cleanup needed as we are reading the original file directly
-
+    logger.info("Reading stored object %s (type: %s)", s3_key, ext)
+    with local_copy(s3_key) as path:
+        yield path

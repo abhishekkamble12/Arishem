@@ -12,13 +12,14 @@ Supported input formats:
   mp4, mov, avi, mkv, mp3, wav, flac, ogg, m4a
 """
 
-import os
 import logging
+import os
 import uuid
 from pathlib import PurePosixPath
-from django.conf import settings
 
 from langchain_core.documents import Document
+
+from ..storage import resolve_local_path
 
 try:
     from faster_whisper import WhisperModel
@@ -31,8 +32,6 @@ SUPPORTED_MEDIA_EXTENSIONS = {
     ".mp4", ".mov", ".avi", ".mkv",   # video
     ".mp3", ".wav", ".flac", ".ogg", ".m4a",  # audio
 }
-
-LOCAL_STORAGE_DIR = os.path.join(settings.BASE_DIR, "local_storage")
 
 # ---------------------------------------------------------------------------
 # Singletons
@@ -75,8 +74,8 @@ def transcribe_media(bucket_name: str, s3_key: str) -> Document:
         and source metadata attached.
     """
     ext = _validate_extension(s3_key)
-    local_path = os.path.join(LOCAL_STORAGE_DIR, s3_key)
-    
+    local_path = resolve_local_path(s3_key)
+
     if not os.path.exists(local_path):
         raise FileNotFoundError(f"Media file not found locally: {local_path}")
 
@@ -84,18 +83,18 @@ def transcribe_media(bucket_name: str, s3_key: str) -> Document:
     job_name = f"local-transcribe-{uuid.uuid4().hex[:8]}"
 
     logger.info("Starting local Whisper transcription job '%s' for %s", job_name, local_path)
-    
+
     model = _get_whisper_model()
     segments, info = model.transcribe(local_path, beam_size=5)
-    
+
     logger.info("Detected language '%s' with probability %f", info.language, info.language_probability)
-    
+
     transcript_text = ""
     for segment in segments:
         transcript_text += segment.text + " "
 
     transcript_text = transcript_text.strip()
-    
+
     if not transcript_text:
         logger.warning("Local whisper returned empty transcript for %s", local_path)
         transcript_text = "[No speech detected]"

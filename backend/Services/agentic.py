@@ -21,10 +21,9 @@ DEMO-SAFE DESIGN:
 
 import json
 import logging
-from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
@@ -105,16 +104,17 @@ def retrieve_for_subqueries(
     vector_store,
     qdrant_filter,
     top_k: int,
-) -> tuple[list[Document], list[dict]]:
+) -> tuple[list[Document], list[float], list[dict]]:
     """
     Run a Qdrant similarity search for each sub-query.
     Merges all results and deduplicates by page_content hash.
 
     Returns:
-        (merged_chunks, retrieval_trace)
+        (merged_chunks, scores, retrieval_trace) where scores[i] is the best
+        similarity score chunk i got across all sub-queries.
         Falls back to empty lists on any failure — demo-safe.
     """
-    seen_content_hashes: set[int] = set()
+    best_score_by_hash: dict[int, float] = {}
     merged_chunks: list[Document] = []
     retrieval_trace: list[dict] = []
 
@@ -128,10 +128,12 @@ def retrieve_for_subqueries(
             new_chunks = []
             for doc, score in results:
                 content_hash = hash(doc.page_content)
-                if content_hash not in seen_content_hashes:
-                    seen_content_hashes.add(content_hash)
+                if content_hash not in best_score_by_hash:
+                    best_score_by_hash[content_hash] = score
                     merged_chunks.append(doc)
                     new_chunks.append(doc)
+                else:
+                    best_score_by_hash[content_hash] = max(best_score_by_hash[content_hash], score)
 
             retrieval_trace.append({
                 "sub_query": sub_query,
@@ -146,7 +148,8 @@ def retrieve_for_subqueries(
             logger.warning("Retrieval failed for sub-query '%s': %s", sub_query[:60], e)
             retrieval_trace.append({"sub_query": sub_query, "error": str(e)})
 
-    return merged_chunks, retrieval_trace
+    scores = [best_score_by_hash[hash(doc.page_content)] for doc in merged_chunks]
+    return merged_chunks, scores, retrieval_trace
 
 
 # ---------------------------------------------------------------------------
