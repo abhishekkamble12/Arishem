@@ -1,7 +1,8 @@
+import json
 import os
 import sys
 import time
-import json
+
 import dotenv
 
 # Load environment variables
@@ -10,13 +11,12 @@ dotenv.load_dotenv("backend/.env")
 # Add current directory to path so we can import Services
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams
+import Services.agent as agent_mod
+import Services.Ai_service.embedding as embedding_mod
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
-
-import Services.Ai_service.embedding as embedding_mod
-import Services.agent as agent_mod
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams
 
 # Adjust the confidence threshold to 0.35 so Q2 passes to the LLM
 agent_mod.CONFIDENCE_THRESHOLD = 0.35
@@ -58,7 +58,7 @@ def main():
         "3. Exception: Under critical security audits, the compliance officer (compliance@arishem.com) may request an extension of retention up to 180 days.\n"
         "4. Audits: External audits will be conducted quarterly by the internal auditing team."
     )
-    
+
     doc = Document(
         page_content=policy_content,
         metadata={"source": "SOP-104_Data_Retention_Policy.pdf", "workspace_id": 1}
@@ -67,7 +67,7 @@ def main():
     # Recreate the collection locally
     if local_client.collection_exists(collection_name="documents"):
         local_client.delete_collection(collection_name="documents")
-        
+
     local_client.create_collection(
         collection_name="documents",
         vectors_config={
@@ -87,7 +87,7 @@ def main():
             vector_name="content-dense",
         )
         vector_store.add_documents([doc])
-        
+
         ingest_latency = int((time.time() - t0) * 1000)
         print(f"   [+] Ingestion successful. Latency: {ingest_latency} ms")
         metrics.append({
@@ -132,7 +132,7 @@ def main():
     ]
 
     print("\n[Phase 2] Executing RAG queries and gathering metrics...")
-    
+
     for q in test_queries:
         print(f"\nRunning {q['id']}: '{q['question']}'")
         t_start = time.time()
@@ -144,12 +144,12 @@ def main():
                 top_k=2
             )
             q_latency = int((time.time() - t_start) * 1000)
-            print(f"   Status: Success")
+            print("   Status: Success")
             print(f"   Latency: {q_latency} ms")
             print(f"   Confidence Score: {res.get('confidence', 0.0):.4f}")
             print(f"   Answer: {res.get('answer')}")
             print(f"   Citations: {res.get('citations')}")
-            
+
             metrics.append({
                 "operation": f"RAG Query {q['id']}",
                 "latency_ms": q_latency,
@@ -173,11 +173,11 @@ def main():
     # --- Phase 3: Generate Markdown Report ---
     print("\n[Phase 3] Generating report: REAL_TEST_METRICS.md...")
     report_content = generate_markdown_report(metrics)
-    
+
     report_path = os.path.join(os.path.dirname(__file__), "REAL_TEST_METRICS.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
-    
+
     print(f"   [+] Saved real measurements and metrics to {report_path}")
     print("\n==================================================")
     print("                  BENCHMARK COMPLETE              ")
@@ -185,7 +185,7 @@ def main():
 
 def generate_markdown_report(metrics):
     now = time.strftime("%Y-%m-%d %H:%M:%S UTC")
-    
+
     md = f"""# Arishem RAG Performance & Measurement Metrics
 
 This report outlines the **real performance metrics** collected from running integration tests on the production-grade RAG pipeline (using **Amazon Bedrock Titan Embed Text v2** and **Groq Meta Llama 3.3 70B**).
@@ -204,13 +204,13 @@ This report outlines the **real performance metrics** collected from running int
         latency = m["latency_ms"]
         status = "✅ " + m["status"] if m["status"] == "Success" else "❌ " + m["status"]
         confidence = m.get("confidence", "N/A")
-        
+
         # Format details
         if "citations" in m:
             details = f"**Answer:** {m['answer']}<br>**Citations:** `{m['citations']}`"
         else:
             details = m.get("details", "")
-            
+
         md += f"| {m['operation']} | {latency} ms | {status} | {confidence} | {details} |\n"
 
     md += """
@@ -230,7 +230,7 @@ This report outlines the **real performance metrics** collected from running int
   - **Out-of-Domain Queries (Q3):** Since the similarity score is below the `0.35` threshold, the query skips the LLM call entirely, conserving API costs.
 - **Citation Fidelity:**
   - Grounded citations return the correct filename (`SOP-104_Data_Retention_Policy.pdf`) and the exact quoting evidence snippet directly from the source.
-  
+
 ---
 *Report generated automatically by the Arishem validation agent.*
 """

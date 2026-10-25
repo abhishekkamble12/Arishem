@@ -6,7 +6,10 @@ creates/fixes app_ingestedfile, and syncs django_migrations records.
 
 Safe to re-run — all operations check before acting.
 """
-import os, django
+import os
+
+import django
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
 
@@ -144,12 +147,12 @@ with connection.cursor() as c:
         rows = c.fetchall()
         for (fk_name,) in rows:
             c.execute(f"ALTER TABLE app_ingestedfile DROP FOREIGN KEY `{fk_name}`")
-            c.execute(f"""
+            c.execute("""
                 ALTER TABLE app_ingestedfile
                 ADD CONSTRAINT fk_ingestedfile_user
                     FOREIGN KEY (uploaded_by_id) REFERENCES app_user(id) ON DELETE SET NULL
             """)
-            print(f"Updated app_ingestedfile FK from auth_user -> app_user")
+            print("Updated app_ingestedfile FK from auth_user -> app_user")
 
         # Fix s3_key column length if needed
         c.execute("""

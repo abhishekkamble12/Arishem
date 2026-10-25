@@ -8,7 +8,8 @@ Usage on a view:
 """
 
 from rest_framework.permissions import BasePermission
-from .models import ROLE_ADMIN, ROLE_EDITOR, ROLE_VIEWER
+
+from .models import ROLE_ADMIN, ROLE_EDITOR
 
 
 class IsAdmin(BasePermission):

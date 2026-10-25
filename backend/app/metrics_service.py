@@ -1,8 +1,11 @@
 from datetime import timedelta
-from django.utils import timezone
+
 from django.db.models import Avg
-from .models import PredictionLog, DriftLog, Workspace
+from django.utils import timezone
+
 from .alerting import send_drift_alert
+from .models import DriftLog, PredictionLog, Workspace
+
 
 def log_prediction_and_check_drift(workspace_id, user, question, result, response_time_ms, error_msg=None):
     """
@@ -52,12 +55,12 @@ def get_workspace_monitoring_stats(workspace_id):
 
     seven_days_ago = timezone.now() - timedelta(days=7)
     recent_predictions = predictions.filter(timestamp__gte=seven_days_ago)
-    
+
     per_day_counts = {}
     for i in range(7):
         d = (timezone.now() - timedelta(days=i)).date()
         per_day_counts[d.isoformat()] = 0
-        
+
     for p in recent_predictions:
         d_str = p.timestamp.date().isoformat()
         if d_str in per_day_counts:

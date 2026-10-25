@@ -37,10 +37,10 @@ def download_youtube(url: str, output_dir: str | None = None) -> str:
     """
     try:
         import yt_dlp  # noqa: F401 — just check it's importable
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError(
-            "yt-dlp is not installed. Run: pip install yt-dlp"
-        )
+            "yt-dlp is not installed. Run: pip install -r requirements-optional.txt"
+        ) from exc
 
     if output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="arishem_yt_")
@@ -132,8 +132,7 @@ def convert_to_wav(file_path: str, output_dir: str | None = None) -> str:
     try:
         result = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=600,  # 10-minute timeout for long videos
         )
         if result.returncode != 0:
@@ -147,9 +146,9 @@ def convert_to_wav(file_path: str, output_dir: str | None = None) -> str:
         raise RuntimeError(
             "ffmpeg is not installed or not on PATH. "
             "Please install ffmpeg: https://ffmpeg.org/download.html"
-        )
+        ) from None
     except subprocess.TimeoutExpired:
-        raise RuntimeError("ffmpeg conversion timed out (>10 minutes).")
+        raise RuntimeError("ffmpeg conversion timed out (>10 minutes).") from None
     except Exception as e:
         logger.exception("ffmpeg conversion failed: %s", e)
         raise RuntimeError(f"Audio conversion failed: {e}") from e

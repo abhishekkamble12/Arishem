@@ -1,9 +1,13 @@
 """Check auth_user_groups table structure and FK targets."""
-import os, django
+import os
+
+import django
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
 
 from django.db import connection
+
 with connection.cursor() as c:
     # Check what table auth_user_groups FKs point to
     c.execute("""

@@ -1,6 +1,7 @@
 import logging
-from django.core.mail import send_mail
+
 from decouple import config
+from django.core.mail import send_mail
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def send_drift_alert(workspace_name: str, drift_score: float, admin_emails: list
             fail_silently=True,
         )
         logger.info(f"Drift alert email sent for workspace '{workspace_name}' to {admin_emails}")
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to send drift alert email.")
 
 
@@ -63,5 +64,5 @@ def send_error_alert(workspace_name: str, error_count: int, admin_emails: list[s
             fail_silently=True,
         )
         logger.info(f"Error alert email sent for workspace '{workspace_name}' to {admin_emails}")
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to send error alert email.")

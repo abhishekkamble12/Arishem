@@ -1,7 +1,7 @@
 import json
-import urllib.request
-import urllib.error
 import time
+import urllib.error
+import urllib.request
 
 BASE_URL = "http://127.0.0.1:8000"
 
@@ -10,11 +10,11 @@ def make_request(path, method="GET", headers=None, data=None):
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
-        
+
     req_data = None
     if data:
         req_data = json.dumps(data).encode("utf-8")
-        
+
     req = urllib.request.Request(url, data=req_data, headers=req_headers, method=method)
     try:
         with urllib.request.urlopen(req) as response:
@@ -28,12 +28,12 @@ def make_request(path, method="GET", headers=None, data=None):
 
 def run_tests():
     print("=== Start End-to-End API Integration Verification ===")
-    
+
     # Generate a unique email to avoid "already registered" errors
     timestamp = int(time.time())
     email = f"tester_{timestamp}@example.com"
     password = "SecurePassword123!"
-    
+
     # 1. Test Registration
     print(f"\n1. Registering user: {email}...")
     reg_payload = {
@@ -60,7 +60,7 @@ def run_tests():
     if status != 200:
         print("[-] Login failed. Exiting.")
         return
-        
+
     access_token = res["tokens"]["access"]
     auth_headers = {"Authorization": f"Bearer {access_token}"}
     print("   [+] Successfully logged in and retrieved JWT access token.")

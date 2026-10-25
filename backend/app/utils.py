@@ -1,12 +1,13 @@
 from rest_framework import status
 from rest_framework.response import Response
 
+
 def resolve_workspace(request, data_dict):
     """
     Extracts workspace_id from the request data or query params.
     Falls back to the user's first workspace.
     Validates that the workspace_id is an integer and that the user has access.
-    
+
     Returns:
         (workspace_id, None) on success
         (None, Response(error)) on failure
@@ -25,5 +26,5 @@ def resolve_workspace(request, data_dict):
 
         if not request.user.workspaces.filter(id=workspace_id).exists():
             return None, Response({"error": "Workspace not found or access denied"}, status=status.HTTP_403_FORBIDDEN)
-            
+
     return workspace_id, None

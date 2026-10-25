@@ -9,11 +9,10 @@ Extracts:
 
 import json
 import logging
-from typing import List, Dict, Any
 
 from decouple import config
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_groq import ChatGroq
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ Respond ONLY in valid JSON matching this schema:
 """
 
 
-def extract_structured_meeting_data(transcript: str) -> Dict[str, List[str]]:
+def extract_structured_meeting_data(transcript: str) -> dict[str, list[str]]:
     """
     Extract action items, key decisions, and open questions from a meeting transcript.
 
@@ -100,16 +99,16 @@ def extract_structured_meeting_data(transcript: str) -> Dict[str, List[str]]:
         }
 
 
-def extract_action_items(transcript: str) -> List[str]:
+def extract_action_items(transcript: str) -> list[str]:
     data = extract_structured_meeting_data(transcript)
     return data.get("action_items", [])
 
 
-def extract_key_decisions(transcript: str) -> List[str]:
+def extract_key_decisions(transcript: str) -> list[str]:
     data = extract_structured_meeting_data(transcript)
     return data.get("key_decisions", [])
 
 
-def extract_open_questions(transcript: str) -> List[str]:
+def extract_open_questions(transcript: str) -> list[str]:
     data = extract_structured_meeting_data(transcript)
     return data.get("open_questions", [])

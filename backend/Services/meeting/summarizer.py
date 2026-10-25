@@ -8,13 +8,11 @@ Uses ChatGroq to:
      - Reduce step: combine chunk summaries into a structured, bullet-point meeting summary.
 """
 
-import json
 import logging
-from typing import List
 
 from decouple import config
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
@@ -100,7 +98,7 @@ def summarize(transcript: str) -> str:
     # Map-Reduce for long transcripts
     try:
         splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=200)
-        chunks: List[str] = splitter.split_text(transcript)
+        chunks: list[str] = splitter.split_text(transcript)
         logger.info("Summarizer: Split transcript into %d chunks for map-reduce", len(chunks))
 
         llm = _get_llm()
