@@ -33,3 +33,10 @@ frontend/dist/
 frontend/tsconfig.tsbuildinfo
 frontend/.tmp/
 .eslintcache
+
+# Personal notes / AI prompts (kept locally, not published)
+backend/up
+ideal_frontend.md
+
+# Personal / generated interview notes (regenerated in Phase 7)
+docs/INTERVIEW_PREP.md
