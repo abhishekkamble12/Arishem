@@ -1,0 +1,5 @@
+-r requirements.txt
+coverage==7.6.1
+ruff==0.8.4
+mypy==1.13.0
+django-stubs==5.1.1

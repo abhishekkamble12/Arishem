@@ -1,24 +1,26 @@
+# Tooling config only. Runtime dependencies are pinned in backend/requirements*.txt,
+# which is what Docker and CI install.
 [project]
 name = "arishem"
 version = "0.1.0"
-description = "Production-oriented, validated end-to-end RAG platform with async Celery ingestion, Groq inference, and quantitative RAGAS evaluation."
+description = "Multi-tenant RAG backend with async Celery ingestion, workspace-isolated vector search and a RAGAS evaluation harness."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "python-decouple>=3.8",
-    "django>=6.0.5",
-    "djangorestframework>=3.17.1",
-    "mysqlclient>=2.2.8",
-    "psycopg2>=2.9.12",
-    "python-dotenv>=1.2.2",
-    "boto3>=1.43.9",
-    "pymupdf>=1.27.2.3",
-    "langchain-qdrant>=1.1.0",
-    "faster-whisper>=1.2.1",
-    "yt-dlp>=2024.5.27",
-]
+dependencies = []
 
-[tool.uv.workspace]
-members = [
-    "backend",
-]
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["frontend", ".venv", "backend/app/migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S110", "S112"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/app/test*.py" = ["B011"]
+"backend/backend/settings.py" = ["E402"]
+"backend/backend/test_settings.py" = ["F403", "F405"]
+# Standalone scripts adjust sys.path / env before importing project modules.
+"backend/*.py" = ["E402"]
+"evals/*.py" = ["E402"]

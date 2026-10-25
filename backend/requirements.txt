@@ -1,3 +1,6 @@
+# Core runtime. Every version is pinned to what the test suite was run against.
+# Optional heavy features (PPTX, YouTube/Whisper meetings) live in requirements-optional.txt.
+
 # Web framework
 django==5.1.4
 djangorestframework==3.15.2
@@ -7,42 +10,31 @@ gunicorn==23.0.0
 
 # Config
 python-decouple==3.8
+dj-database-url==2.3.0
 
-# Database
-mysqlclient==2.2.6
+# Database (managed PostgreSQL; SQLite is used for local dev/tests)
+psycopg[binary]==3.2.3
 
-# AWS — boto3/botocore version is resolved by langchain-aws automatically.
-# Do NOT pin boto3 here; it conflicts with langchain-aws's own botocore constraint.
-boto3>=1.35.0
+# Object storage (any S3-compatible service)
+boto3==1.43.9
 
-# LangChain stack
-langchain-aws==0.2.14
+# RAG stack
+langchain-core==0.3.86
 langchain-community==0.3.19
 langchain-text-splitters==0.3.8
 langchain-groq==0.2.0
 langchain-qdrant==0.2.0
-
-# Vector DB client
-qdrant-client>=1.14.0
+qdrant-client==1.13.3
+sentence-transformers==5.7.0
 
 # Document loaders
 pymupdf==1.25.3
 docx2txt==0.8
-unstructured[pptx]==0.17.2
 
-# Background workers & queue broker
+# Background workers
 celery==5.4.0
 redis==5.0.8
 
-# Local AI Models
-sentence-transformers>=3.0.1
-faster-whisper>=1.2.1
-
-# Social Auth & HTTP
+# Social login (disabled in the first deployment but imported by URL config)
 google-auth==2.35.0
-requests==2.32.3
-urllib3<2.0.0
-
-# Meeting Intelligence / Audio Processing
-yt-dlp>=2024.11.18
-pydub>=0.25.1
+requests==2.34.2

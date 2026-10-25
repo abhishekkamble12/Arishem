@@ -1,0 +1,10 @@
+# Optional features, not installed in the default image.
+-r requirements.txt
+
+# .pptx ingestion
+unstructured[pptx]==0.17.2
+
+# YouTube / recording transcription (Meeting Intelligence)
+faster-whisper==1.2.1
+yt-dlp==2024.11.18
+pydub==0.25.1
