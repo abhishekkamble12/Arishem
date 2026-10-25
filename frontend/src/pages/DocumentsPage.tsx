@@ -3,8 +3,8 @@ import { useAuthStore } from '../store/authStore';
 import { useDocuments } from '../hooks/useDocuments';
 import { aiApi, IngestedFile } from '../api/ai';
 import {
-  Upload, HelpCircle, CheckCircle, AlertCircle, FileText, Film, Loader2,
-  CloudUpload, Link as LinkIcon, Trash2, RefreshCw, Layers, ShieldCheck, Database
+  Upload, HelpCircle, CheckCircle, AlertCircle, FileText, Loader2,
+  CloudUpload, Link as LinkIcon, Trash2, RefreshCw, Database
 } from 'lucide-react';
 
 type UploadMode = 'direct' | 's3key';
@@ -12,7 +12,7 @@ const ACCEPTED = '.pdf,.docx,.pptx,.mp4,.mov,.avi,.mkv,.mp3,.wav,.flac,.ogg,.m4a
 
 export const DocumentsPage: React.FC = () => {
   const { activeWorkspaceId, user } = useAuthStore();
-  const { files, isLoading, isPolling, error: pollError, refetch, deleteFile } = useDocuments();
+  const { files, isLoading, isPolling, refetch, deleteFile } = useDocuments();
 
   const [mode, setMode] = useState<UploadMode>('direct');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);

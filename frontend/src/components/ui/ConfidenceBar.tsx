@@ -10,14 +10,12 @@ interface ConfidenceBarProps {
 
 export const ConfidenceBar: React.FC<ConfidenceBarProps> = ({
   score = 0,
-  size = 'md',
   showLabel = true,
   className = '',
 }) => {
   const percentage = Math.min(100, Math.max(0, Math.round(score * 100)));
 
   // Red <0.35, Yellow 0.35–0.60, Green >0.60
-  let tone: 'low' | 'mid' | 'high' = 'low';
   let label = 'Low Match';
   let barColor = 'bg-rose-500';
   let textColor = 'text-rose-400';
@@ -25,14 +23,12 @@ export const ConfidenceBar: React.FC<ConfidenceBarProps> = ({
   let Icon = AlertCircle;
 
   if (score >= 0.60) {
-    tone = 'high';
     label = 'Strong Match';
     barColor = 'bg-emerald-400';
     textColor = 'text-emerald-400';
     bgColor = 'bg-emerald-500/10 border-emerald-500/20';
     Icon = ShieldCheck;
   } else if (score >= 0.35) {
-    tone = 'mid';
     label = 'Moderate Match';
     barColor = 'bg-amber-400';
     textColor = 'text-amber-400';

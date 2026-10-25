@@ -1,5 +1,5 @@
 import React from 'react';
-import { HelpCircle, Sparkles, ArrowRight, Upload } from 'lucide-react';
+import { HelpCircle, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 interface OODMessageCardProps {

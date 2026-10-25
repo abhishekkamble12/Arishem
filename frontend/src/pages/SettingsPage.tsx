@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import {
-  Settings, User, Shield, Key, Database, Cpu, CheckCircle2,
-  AlertTriangle, RefreshCw, Radio, HardDrive, ToggleLeft
+  Settings, Shield, Database, Cpu, CheckCircle2
 } from 'lucide-react';
 
 interface Member {
@@ -18,7 +17,7 @@ export const SettingsPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Mock members representing typical RAG workspace members
-  const [members, setMembers] = useState<Member[]>([
+  const [members] = useState<Member[]>([
     { id: 1, username: 'Abhishek', email: 'abhishek@arishem.ai', role: 'admin', date_joined: '2026-08-01' },
     { id: 2, username: 'Sarah Jenkins', email: 'sarah.j@company.com', role: 'editor', date_joined: '2026-08-05' },
     { id: 3, username: 'John Doe', email: 'john.doe@viewer.com', role: 'viewer', date_joined: '2026-08-10' }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, FileText, Film, Music, CheckCircle, ExternalLink } from 'lucide-react';
+import { X, FileText, Film, Music, CheckCircle } from 'lucide-react';
 
 interface Citation {
   source: string;

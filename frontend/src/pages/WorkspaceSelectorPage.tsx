@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Database, LogOut, ArrowRight, Shield, Layers, Plus } from 'lucide-react';
+import { Database, LogOut, ArrowRight, Shield, Layers } from 'lucide-react';
 
 export const WorkspaceSelectorPage: React.FC = () => {
   const { user, activeWorkspaceId, setActiveWorkspaceId, workspaces, clearAuth } = useAuthStore();

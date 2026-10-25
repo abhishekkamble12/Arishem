@@ -2,7 +2,7 @@ import React from 'react';
 import { FEATURES } from '../../config';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { LogOut, Database, Upload, User as UserIcon, MessageSquare, BarChart2, Video, Settings, Layers } from 'lucide-react';
+import { LogOut, Database, Upload, User as MessageSquare, BarChart2, Video, Settings, Layers } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, clearAuth, activeWorkspaceId, setActiveWorkspaceId } = useAuthStore();

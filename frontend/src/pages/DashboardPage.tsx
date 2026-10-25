@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useDocuments } from '../hooks/useDocuments';
 import {
-  MessageSquare, FileText, Upload, BarChart3, Settings, ShieldAlert,
-  Clock, ArrowRight, Database, ChevronRight, FileCheck, Layers, HelpCircle
+  MessageSquare, FileText, Upload, BarChart3, Settings, 
+  Clock, ArrowRight, Database, ChevronRight, FileCheck
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
 import {
   Chart as ChartJS,
@@ -12,11 +12,11 @@ import {
   Legend,
   Filler,
 } from "chart.js";
-import { Line, Bar } from "react-chartjs-2";
+import { Line } from "react-chartjs-2";
 import { useAuthStore } from "../store/authStore";
 import {
-  Activity, Clock, ShieldCheck, AlertTriangle, TrendingUp,
-  Loader2, RefreshCw, BarChart3, Database, Sparkles
+  Activity, ShieldCheck, AlertTriangle, TrendingUp,
+  Loader2, RefreshCw
 } from "lucide-react";
 
 ChartJS.register(
@@ -77,7 +77,7 @@ export default function MonitoringPage() {
   const { accessToken, activeWorkspaceId } = useAuthStore();
   const [stats, setStats] = useState<MonitoringStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [isDemoMode, setIsDemoMode] = useState(false);
 
   const fetchStats = async (useDemo = false) => {

@@ -1,22 +1,20 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useChatStore, ChatMessage } from '../store/chatStore';
-import { useAuthStore } from '../store/authStore';
+import { useChatStore } from '../store/chatStore';
 import { useDocuments } from '../hooks/useDocuments';
 import { ConfidenceBar } from '../components/ui/ConfidenceBar';
 import { ReasoningTrace } from '../components/chat/ReasoningTrace';
 import { OODMessageCard } from '../components/chat/OODMessageCard';
 import { CitationPreviewPanel } from '../components/chat/CitationPreviewPanel';
 import {
-  MessageSquare, FileText, Send, Sparkles, Loader2, Trash2,
-  ChevronRight, ArrowRight, ShieldAlert, BookOpen
+  MessageSquare, Send, Sparkles, Loader2, 
+  ShieldAlert, BookOpen
 } from 'lucide-react';
 
 export const ChatPage: React.FC = () => {
   const {
     messages, askQuestion, clearHistory, isQuerying
   } = useChatStore();
-  const { activeWorkspaceId } = useAuthStore();
   const { files, isLoading: isDocsLoading } = useDocuments();
 
   const [question, setQuestion] = useState('');

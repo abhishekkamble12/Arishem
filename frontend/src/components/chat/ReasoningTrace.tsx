@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ReasoningStep } from '../../api/ai';
-import { ChevronDown, ChevronUp, GitBranch, ShieldCheck, AlertTriangle, Layers, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, GitBranch } from 'lucide-react';
 
 interface ReasoningTraceProps {
   steps?: ReasoningStep[];
@@ -11,7 +11,6 @@ interface ReasoningTraceProps {
 export const ReasoningTrace: React.FC<ReasoningTraceProps> = ({
   steps = [],
   critiqueVerdict,
-  agenticMode,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
 
