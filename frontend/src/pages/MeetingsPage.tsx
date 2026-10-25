@@ -93,7 +93,7 @@ export const MeetingsPage: React.FC = () => {
 
     try {
       const res = await aiApi.ingestYoutube(youtubeUrl, activeWorkspaceId);
-      setSuccess(res.message || 'YouTube audio downloaded & ingested successfully!');
+      setSuccess(res.message || 'YouTube ingestion queued — the transcript will appear when processing finishes.');
       setYoutubeUrl('');
       await fetchMeetingFiles();
       if (res.file_id) {

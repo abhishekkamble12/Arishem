@@ -12,7 +12,7 @@ export const UploadPage: React.FC = () => {
   const [mode, setMode] = useState<UploadMode>('direct');
   const [files, setFiles] = useState<IngestedFile[]>([]);
   const [isFetchingFiles, setIsFetchingFiles] = useState(false);
-  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Direct upload state
@@ -56,17 +56,17 @@ export const UploadPage: React.FC = () => {
 
   useEffect(() => { fetchFiles(); }, [activeWorkspaceId]);
 
-  const handleDeleteFile = async (s3Key: string) => {
-    if (!confirm(`Remove "${s3Key.split('/').pop()}" from knowledge base?`)) return;
-    setDeletingKey(s3Key);
+  const handleDeleteFile = async (fileId: number, name: string) => {
+    if (!confirm(`Remove "${name}" from knowledge base?`)) return;
+    setDeletingId(fileId);
     setDeleteError(null);
     try {
-      await aiApi.deleteFile(s3Key);
+      await aiApi.deleteFile(fileId);
       await fetchFiles();
     } catch (err: any) {
       setDeleteError(err.response?.data?.error || 'Delete failed');
     } finally {
-      setDeletingKey(null);
+      setDeletingId(null);
     }
   };
 
@@ -307,12 +307,12 @@ export const UploadPage: React.FC = () => {
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 {files.map((file) => {
-                  const s3Key = file.s3_key;
-                  const isDeleting = deletingKey === s3Key;
+                  const name = file.original_filename || file.s3_key.split('/').pop() || file.s3_key;
+                  const isDeleting = deletingId === file.id;
                   return (
                     <div key={file.id} className="flex items-center justify-between bg-dark-900/40 border border-dark-800 rounded-xl px-3 py-2 gap-2">
                       <div className="truncate">
-                        <p className="text-xs font-medium text-dark-100 truncate">{s3Key.split('/').pop()}</p>
+                        <p className="text-xs font-medium text-dark-100 truncate">{name}</p>
                         <p className={`text-[10px] mt-0.5 ${file.status === 'SUCCESS' ? 'text-emerald-400' :
                             file.status === 'FAILED' ? 'text-red-400' :
                               'text-amber-400'}`
@@ -320,7 +320,7 @@ export const UploadPage: React.FC = () => {
                       </div>
                       {(user?.role === 'editor' || user?.role === 'admin') && (
                         <button
-                          onClick={() => handleDeleteFile(s3Key)}
+                          onClick={() => handleDeleteFile(file.id, name)}
                           disabled={isDeleting}
                           className="p-1.5 text-dark-500 hover:text-red-400 disabled:opacity-40 flex-shrink-0 rounded-lg hover:bg-red-500/10 transition-colors"
                           title="Remove from knowledge base"

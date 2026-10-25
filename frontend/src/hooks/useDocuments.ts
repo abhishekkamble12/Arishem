@@ -10,7 +10,7 @@ export interface UseDocumentsResult {
   hasActiveJobs: boolean;
   activeJobsCount: number;
   refetch: () => Promise<void>;
-  deleteFile: (s3Key: string) => Promise<void>;
+  deleteFile: (fileId: number) => Promise<void>;
 }
 
 export function useDocuments(pollIntervalMs: number = 2500): UseDocumentsResult {
@@ -84,8 +84,8 @@ export function useDocuments(pollIntervalMs: number = 2500): UseDocumentsResult 
     return () => clearInterval(timer);
   }, [hasActiveJobs, activeWorkspaceId, pollIntervalMs, fetchFiles]);
 
-  const deleteFile = async (s3Key: string) => {
-    await aiApi.deleteFile(s3Key);
+  const deleteFile = async (fileId: number) => {
+    await aiApi.deleteFile(fileId);
     await fetchFiles(false);
   };
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { FEATURES } from '../../config';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { LogOut, Database, Upload, User as UserIcon, MessageSquare, BarChart2, Video, Settings, Layers } from 'lucide-react';
@@ -81,6 +82,7 @@ export const Navbar: React.FC = () => {
             </Link>
           )}
 
+          {FEATURES.meetings && (
           <Link
             to="/meetings"
             className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
@@ -92,6 +94,7 @@ export const Navbar: React.FC = () => {
             <Video className="w-3.5 h-3.5" />
             <span>Meetings</span>
           </Link>
+          )}
 
           {user && (user.role === 'admin' || user.role === 'editor') && (
             <Link

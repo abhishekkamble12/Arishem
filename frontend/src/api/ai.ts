@@ -13,6 +13,7 @@ export interface ReasoningStep {
 export interface IngestedFile {
   id: number;
   s3_key: string;
+  original_filename?: string | null;
   file_type: string;
   chunks_stored: number;
   status: string;
@@ -107,14 +108,14 @@ export const aiApi = {
     return response.data;
   },
 
-  deleteFile: async (s3Key: string): Promise<{ message: string }> => {
+  deleteFile: async (fileId: number): Promise<{ message: string }> => {
     const response = await apiClient.delete<{ message: string }>('/ai/files/delete', {
-      data: { s3_key: s3Key },
+      data: { file_id: fileId },
     });
     return response.data;
   },
 
-  ingestYoutube: async (url: string, workspaceId: number): Promise<{ message: string; file_id: number; chunks_stored: number }> => {
+  ingestYoutube: async (url: string, workspaceId: number): Promise<{ message: string; task_id: string; file_id: number; status: string }> => {
     const response = await apiClient.post('/ai/meetings/ingest-youtube', {
       url,
       workspace_id: workspaceId,

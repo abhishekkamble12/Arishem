@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useDocuments } from '../hooks/useDocuments';
-import { aiApi } from '../api/ai';
+import { aiApi, IngestedFile } from '../api/ai';
 import {
   Upload, HelpCircle, CheckCircle, AlertCircle, FileText, Film, Loader2,
   CloudUpload, Link as LinkIcon, Trash2, RefreshCw, Layers, ShieldCheck, Database
@@ -23,7 +23,7 @@ export const DocumentsPage: React.FC = () => {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [result, setResult] = useState<{ message: string; s3Key: string; taskId: string; fileId: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,16 +40,16 @@ export const DocumentsPage: React.FC = () => {
     setErrorMsg(null);
   };
 
-  const handleDeleteFile = async (key: string) => {
-    if (!confirm(`Remove "${key.split('/').pop()}" from the knowledge base?`)) return;
-    setDeletingKey(key);
+  const handleDeleteFile = async (file: IngestedFile) => {
+    if (!confirm(`Remove "${displayName(file)}" from the knowledge base?`)) return;
+    setDeletingId(file.id);
     setDeleteError(null);
     try {
-      await deleteFile(key);
+      await deleteFile(file.id);
     } catch (err: any) {
       setDeleteError(err.response?.data?.error || 'Delete failed');
     } finally {
-      setDeletingKey(null);
+      setDeletingId(null);
     }
   };
 
@@ -106,7 +106,7 @@ export const DocumentsPage: React.FC = () => {
     }
   };
 
-  const getFileBasename = (key: string) => key.split('/').pop() || key;
+  const displayName = (file: IngestedFile) => file.original_filename || file.s3_key.split('/').pop() || file.s3_key;
 
   const canSubmit = mode === 'direct' ? !!selectedFile : !!s3Key.trim();
   const canDelete = user?.role === 'admin' || user?.role === 'editor';
@@ -313,9 +313,9 @@ export const DocumentsPage: React.FC = () => {
                   </thead>
                   <tbody>
                     {files.map((file) => {
-                      const isDeleting = deletingKey === file.s3_key;
+                      const isDeleting = deletingId === file.id;
                       const status = (file.status || '').toLowerCase();
-                      const basename = getFileBasename(file.s3_key);
+                      const basename = displayName(file);
 
                       return (
                         <tr key={file.id} className="border-b border-dark-800/40 hover:bg-dark-900/10">
@@ -339,7 +339,7 @@ export const DocumentsPage: React.FC = () => {
                           <td className="py-3">
                             {canDelete && (
                               <button
-                                onClick={() => handleDeleteFile(file.s3_key)}
+                                onClick={() => handleDeleteFile(file)}
                                 disabled={isDeleting}
                                 className="p-1.5 text-dark-400 hover:text-red-400 disabled:opacity-40 rounded-lg hover:bg-red-500/10 transition-colors"
                                 title="Delete from knowledge base"

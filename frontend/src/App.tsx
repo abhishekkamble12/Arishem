@@ -1,4 +1,5 @@
 import React from 'react';
+import { FEATURES } from './config';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Navbar } from './components/layout/Navbar';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
@@ -44,7 +45,7 @@ export const App: React.FC = () => {
           <Route element={<AuthenticatedLayout />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/chat" element={<ChatPage />} />
-            <Route path="/meetings" element={<MeetingsPage />} />
+            {FEATURES.meetings && <Route path="/meetings" element={<MeetingsPage />} />}
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/profile" element={<Navigate to="/settings" replace />} />
             <Route path="/upload" element={<Navigate to="/documents" replace />} />

@@ -2,14 +2,14 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { authApi } from '../api/auth';
-import { Mail, Lock, UserPlus, Database, AlertCircle, Shield, User as UserIcon } from 'lucide-react';
+import { Mail, Lock, UserPlus, Database, AlertCircle, User as UserIcon } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
+import { FEATURES } from '../config';
 
 
 export const RegisterPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
-  const [role, setRole] = useState<'viewer' | 'editor' | 'admin'>('viewer');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +38,6 @@ export const RegisterPage: React.FC = () => {
         email,
         password,
         password2,
-        role,
         username || undefined
       );
       // Log in immediately on success
@@ -134,32 +133,7 @@ export const RegisterPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Role Field */}
-            <div className="space-y-1.5">
-              <label htmlFor="role" className="text-xs font-semibold text-dark-200 uppercase tracking-wider block">
-                Assign System Role <span className="text-brand-400">*</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-dark-500">
-                  <Shield className="w-5 h-5" />
-                </div>
-                <select
-                  id="role"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as any)}
-                  className="w-full pl-11 pr-10 py-2.5 bg-dark-900/60 border border-dark-800 rounded-xl text-dark-100 placeholder-dark-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all duration-200 text-sm appearance-none cursor-pointer"
-                >
-                  <option value="viewer" className="bg-dark-900 text-dark-100">Viewer (Queries & lists only)</option>
-                  <option value="editor" className="bg-dark-900 text-dark-100">Editor (Viewer + S3 Uploads)</option>
-                  <option value="admin" className="bg-dark-900 text-dark-100">Admin (Full permissions)</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-dark-400">
-                  <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                    <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
+            <p className="text-xs text-dark-400">New accounts start as viewers. An admin can grant editor or admin access.</p>
 
             {/* Password Field */}
             <div className="space-y-1.5">
@@ -228,6 +202,7 @@ export const RegisterPage: React.FC = () => {
             </Link>
           </div>
 
+          {FEATURES.socialAuth && (
           <div className="mt-6 flex flex-col gap-4">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -284,6 +259,7 @@ export const RegisterPage: React.FC = () => {
               <span>Sign up with GitHub</span>
             </button>
           </div>
+          )}
         </div>
       </div>
     </div>

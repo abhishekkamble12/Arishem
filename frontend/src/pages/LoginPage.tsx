@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { authApi } from '../api/auth';
-import { Mail, Lock, LogIn, Database, AlertCircle, UserPlus, Shield, User as UserIcon } from 'lucide-react';
+import { Mail, Lock, LogIn, Database, AlertCircle, UserPlus, User as UserIcon } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
+import { FEATURES } from '../config';
 
 export const LoginPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
@@ -15,7 +16,6 @@ export const LoginPage: React.FC = () => {
   // Register form state
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerUsername, setRegisterUsername] = useState('');
-  const [registerRole, setRegisterRole] = useState<'viewer' | 'editor' | 'admin'>('viewer');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerPassword2, setRegisterPassword2] = useState('');
 
@@ -71,7 +71,6 @@ export const LoginPage: React.FC = () => {
         registerEmail,
         registerPassword,
         registerPassword2,
-        registerRole,
         registerUsername || undefined
       );
       setAuth(response.user, response.tokens.access, response.tokens.refresh);
@@ -256,25 +255,6 @@ export const LoginPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-dark-200 uppercase tracking-wider block">
-                  Preferred Role <span className="text-brand-400">*</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-dark-500">
-                    <Shield className="w-4 h-4" />
-                  </div>
-                  <select
-                    value={registerRole}
-                    onChange={(e) => setRegisterRole(e.target.value as any)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-dark-900/80 border border-dark-800 rounded-xl text-dark-100 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/25 text-sm cursor-pointer select-none"
-                  >
-                    <option value="viewer" className="bg-dark-950 text-dark-100">Viewer (Read Only)</option>
-                    <option value="editor" className="bg-dark-950 text-dark-100">Editor (Read + Upload)</option>
-                    <option value="admin" className="bg-dark-950 text-dark-100">Administrator (Full Access)</option>
-                  </select>
-                </div>
-              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -325,6 +305,7 @@ export const LoginPage: React.FC = () => {
           )}
 
           {/* Social Signin divider */}
+          {FEATURES.socialAuth && (
           <div className="mt-6 flex flex-col gap-4">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -380,6 +361,7 @@ export const LoginPage: React.FC = () => {
               <span>Sign in with GitHub</span>
             </button>
           </div>
+          )}
         </div>
       </div>
     </div>

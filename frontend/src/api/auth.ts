@@ -23,7 +23,6 @@ export const authApi = {
     email: string,
     password: string,
     password2: string,
-    role?: 'viewer' | 'editor' | 'admin',
     username?: string
   ): Promise<AuthResponse> => {
     const payload: Record<string, unknown> = {
@@ -31,7 +30,6 @@ export const authApi = {
       password,
       password2,
     };
-    if (role) payload.role = role;
     if (username) payload.username = username;
 
     const response = await apiClient.post<AuthResponse>('/auth/register', payload);
