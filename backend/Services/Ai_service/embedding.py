@@ -1,11 +1,11 @@
 import logging
-from typing import List
 
 from decouple import config
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
+from qdrant_client.http import models as qdrant_models
 from qdrant_client.http.models import Distance, VectorParams
 
 logger = logging.getLogger(__name__)
@@ -51,94 +51,83 @@ def get_qdrant_client() -> QdrantClient:
     return _qdrant_client
 
 
+class CollectionConfigError(RuntimeError):
+    """The existing Qdrant collection is incompatible with the embedding model."""
+
+
+_collection_ready = False
+
+# (field, schema) payload indexes every query/delete relies on.
+_PAYLOAD_INDEXES = (
+    ("metadata.workspace_id", "integer"),
+    ("metadata.file_id", "integer"),
+    ("metadata.uploaded_by", "keyword"),
+)
+
+
+def _dense_vector_size(info) -> int | None:
+    """Size of the 'content-dense' vector, or None if it can't be determined."""
+    vectors = info.config.params.vectors
+    if isinstance(vectors, dict):
+        params = vectors.get("content-dense")
+        return params.size if params is not None else None
+    return getattr(vectors, "size", None)
+
+
 def ensure_collection_exists() -> None:
     """
-    Create the Qdrant collection if it doesn't already exist.
-    Recreates it if there is a vector name or dimension mismatch.
-    Safe to call multiple times (idempotent).
+    Create the Qdrant collection and payload indexes if they are missing.
+
+    Never deletes data. A transient Qdrant error propagates to the caller (the
+    request fails and can be retried) instead of being treated as "needs
+    recreating". A collection whose vector size differs from the embedding
+    model raises CollectionConfigError: switching models means re-embedding,
+    which is an explicit migration, not something to do silently at request time.
+    Runs its checks once per process; safe to call repeatedly.
     """
-    client = get_qdrant_client()
-    try:
-        existing = {c.name for c in client.get_collections().collections}
-    except Exception as e:
-        logger.error("Failed to list Qdrant collections: %s", e)
+    global _collection_ready
+    if _collection_ready:
         return
 
-    should_create = QDRANT_COLLECTION not in existing
+    client = get_qdrant_client()
+    existing = {c.name for c in client.get_collections().collections}
 
-    if QDRANT_COLLECTION in existing:
-        try:
-            info = client.get_collection(collection_name=QDRANT_COLLECTION)
-            vectors = info.config.params.vectors
-            
-            # Extract current size of the 'content-dense' vector
-            current_size = None
-            if isinstance(vectors, dict):
-                if "content-dense" in vectors:
-                    current_size = vectors["content-dense"].size
-            elif hasattr(vectors, "size"):
-                current_size = vectors.size
-            else:
-                # vectors might be a VectorsConfig object (e.g. in some qdrant_client versions)
-                if hasattr(vectors, "params") and isinstance(vectors.params, dict):
-                    if "content-dense" in vectors.params:
-                        current_size = vectors.params["content-dense"].size
-                elif hasattr(vectors, "params") and hasattr(vectors.params, "size"):
-                    current_size = vectors.params.size
-
-            if current_size is not None and current_size != EMBEDDING_DIMENSION:
-                logger.warning(
-                    "Qdrant collection '%s' vector dimension mismatch: collection has %d, but embedding model has %d. Recreating...",
-                    QDRANT_COLLECTION, current_size, EMBEDDING_DIMENSION
-                )
-                client.delete_collection(collection_name=QDRANT_COLLECTION)
-                should_create = True
-        except Exception as e:
-            logger.warning("Failed to verify Qdrant collection config: %s. Recreating to be safe.", e)
-            try:
-                client.delete_collection(collection_name=QDRANT_COLLECTION)
-            except Exception:
-                pass
-            should_create = True
-
-    if should_create:
+    if QDRANT_COLLECTION not in existing:
         client.create_collection(
             collection_name=QDRANT_COLLECTION,
             vectors_config={
-                "content-dense": VectorParams(
-                    size=EMBEDDING_DIMENSION,
-                    distance=Distance.COSINE,
-                )
+                "content-dense": VectorParams(size=EMBEDDING_DIMENSION, distance=Distance.COSINE)
             },
         )
-        logger.info("Created Qdrant collection '%s' with dimension %d", QDRANT_COLLECTION, EMBEDDING_DIMENSION)
+        logger.info("Created Qdrant collection '%s' (dim %d)", QDRANT_COLLECTION, EMBEDDING_DIMENSION)
     else:
-        logger.debug("Collection '%s' already exists and matches configuration", QDRANT_COLLECTION)
+        size = _dense_vector_size(client.get_collection(collection_name=QDRANT_COLLECTION))
+        if size is not None and size != EMBEDDING_DIMENSION:
+            raise CollectionConfigError(
+                f"Collection '{QDRANT_COLLECTION}' has vector size {size} but the embedding model "
+                f"produces {EMBEDDING_DIMENSION}. Re-embed into a new collection "
+                f"(set QDRANT_COLLECTION) instead of reusing this one."
+            )
 
-    # Ensure payload index on metadata.workspace_id exists
-    try:
-        client.create_payload_index(
-            collection_name=QDRANT_COLLECTION,
-            field_name="metadata.workspace_id",
-            field_schema="integer",
-        )
-        logger.info("Ensured payload index on 'metadata.workspace_id' exists")
-    except Exception as e:
-        logger.warning("Failed to create payload index on 'metadata.workspace_id': %s", e)
+    for field, schema in _PAYLOAD_INDEXES:
+        try:
+            client.create_payload_index(
+                collection_name=QDRANT_COLLECTION, field_name=field, field_schema=schema
+            )
+        except Exception:
+            # Index already exists (Qdrant has no "if not exists"); a real outage
+            # would have failed the calls above.
+            logger.debug("Payload index %s not created (probably exists)", field)
 
-    # Ensure payload index on metadata.uploaded_by exists
-    try:
-        client.create_payload_index(
-            collection_name=QDRANT_COLLECTION,
-            field_name="metadata.uploaded_by",
-            field_schema="keyword",
-        )
-        logger.info("Ensured payload index on 'metadata.uploaded_by' exists")
-    except Exception as e:
-        logger.warning("Failed to create payload index on 'metadata.uploaded_by': %s", e)
+    _collection_ready = True
 
 
-def embed_and_store(chunks: List[Document], workspace_id: int, uploaded_by: str = None) -> int:
+def embed_and_store(
+    chunks: list[Document],
+    workspace_id: int,
+    uploaded_by: str = None,
+    file_id: int | None = None,
+) -> int:
     """
     Embed a list of Document chunks and upsert them into Qdrant.
 
@@ -146,13 +135,15 @@ def embed_and_store(chunks: List[Document], workspace_id: int, uploaded_by: str 
         chunks: List of LangChain Documents (typically from Extractor.extract_and_chunk).
         workspace_id: The ID of the workspace these chunks belong to.
         uploaded_by: The email address of the user who uploaded these documents.
+        file_id: IngestedFile id, stored on every chunk so the file's vectors
+                 can be deleted later.
 
     Returns:
         Number of chunks stored.
 
     Raises:
         ValueError: if chunks is empty.
-        Exception:  propagates Qdrant / Bedrock errors.
+        Exception:  propagates Qdrant / embedding errors.
     """
     if not chunks:
         raise ValueError("embed_and_store received an empty chunk list — nothing to store.")
@@ -161,6 +152,8 @@ def embed_and_store(chunks: List[Document], workspace_id: int, uploaded_by: str 
         chunk.metadata["workspace_id"] = workspace_id
         if uploaded_by:
             chunk.metadata["uploaded_by"] = uploaded_by
+        if file_id is not None:
+            chunk.metadata["file_id"] = file_id
 
     ensure_collection_exists()
 
@@ -178,6 +171,33 @@ def embed_and_store(chunks: List[Document], workspace_id: int, uploaded_by: str 
 
     logger.info("Successfully stored %d chunks", len(chunks))
     return len(chunks)
+
+
+def delete_file_vectors(file_id: int, workspace_id: int) -> None:
+    """
+    Delete every vector belonging to one ingested file.
+
+    Filters on workspace_id as well as file_id so a bad id can never touch
+    another tenant's data. Idempotent: deleting twice is a no-op.
+    """
+    ensure_collection_exists()
+    get_qdrant_client().delete(
+        collection_name=QDRANT_COLLECTION,
+        points_selector=qdrant_models.FilterSelector(
+            filter=qdrant_models.Filter(must=[
+                qdrant_models.FieldCondition(
+                    key="metadata.file_id",
+                    match=qdrant_models.MatchValue(value=file_id),
+                ),
+                qdrant_models.FieldCondition(
+                    key="metadata.workspace_id",
+                    match=qdrant_models.MatchValue(value=workspace_id),
+                ),
+            ])
+        ),
+        wait=True,
+    )
+    logger.info("Deleted vectors for file #%d (workspace %d)", file_id, workspace_id)
 
 
 def get_vector_store() -> QdrantVectorStore:
