@@ -1,75 +1,97 @@
-version: "3.9"
+# Local development stack: Postgres, Qdrant, MinIO (S3-compatible), Redis, API, worker, beat.
+# Reproducible with only a .env containing SECRET_KEY and GROQ_API_KEY (see .env.example).
+# Production uses managed Postgres/Qdrant/object storage instead; see docs/DEPLOY.md when it exists.
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Arishem — Full Stack Development & Production Compose Stack
-#
-# Services:
-#   redis    — In-memory message broker for Celery task queues
-#   migrate  — One-shot container that executes DB migrations then exits
-#   api      — Django REST Framework + Gunicorn API server (Port 8000)
-#   celery   — Background worker for async document ingestion & transcription
-# ─────────────────────────────────────────────────────────────────────────────
+x-app: &app
+  build: ./backend
+  restart: unless-stopped
+  environment: &app-env
+    SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+    DEBUG: "True"                     # local only: disables the HTTPS redirect
+    ALLOWED_HOSTS: localhost,127.0.0.1
+    CORS_ALLOWED_ORIGINS: http://localhost:5173
+    DATABASE_URL: postgres://arishem:arishem@postgres:5432/arishem
+    QDRANT_URL: http://qdrant:6333
+    QDRANT_COLLECTION: documents
+    STORAGE_BACKEND: s3
+    OBJECT_STORAGE_ENDPOINT_URL: http://minio:9000
+    OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
+    OBJECT_STORAGE_BUCKET: arishem-documents
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    CACHE_URL: redis://redis:6379/2
+    GROQ_API_KEY: ${GROQ_API_KEY:-}
+  depends_on: &app-deps
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    qdrant: {condition: service_started}
+    minio-init: {condition: service_completed_successfully}
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: arishem, POSTGRES_PASSWORD: arishem, POSTGRES_DB: arishem}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arishem"]
+      interval: 5s
+      retries: 10
 
-  # ── Message Broker ─────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10}
 
-  # ── Database migration (runs once, then exits) ──────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    volumes: [qdrant:/qdrant/storage]
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: server /data --console-address ":9001"
+    ports: ["9001:9001"]              # web console (minioadmin / minioadmin)
+    volumes: [minio:/data]
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+                  mc mb --ignore-existing local/arishem-documents"
+
   migrate:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    env_file:
-      - ./backend/backend/.env
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             echo '✅ Migrations complete'"
+    <<: *app
     restart: "no"
+    command: python manage.py migrate --noinput
 
-  # ── API server ───────────────────────────────────────────────────────────────
   api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    env_file:
-      - ./backend/backend/.env
-    ports:
-      - "8000:8000"
+    <<: *app
+    ports: ["8000:8000"]
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
+      <<: *app-deps
+      migrate: {condition: service_completed_successfully}
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/app/auth/workspaces')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/app/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
 
-  # ── Celery Background Worker ────────────────────────────────────────────────
-  celery:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    env_file:
-      - ./backend/backend/.env
+  worker:
+    <<: *app
     command: celery -A backend worker --loglevel=info
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
+      <<: *app-deps
+      migrate: {condition: service_completed_successfully}
+
+  beat:
+    <<: *app
+    command: celery -A backend beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    depends_on:
+      <<: *app-deps
+      migrate: {condition: service_completed_successfully}
+
+volumes:
+  pgdata:
+  qdrant:
+  minio:

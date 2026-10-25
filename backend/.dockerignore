@@ -19,6 +19,9 @@ staticfiles/
 *.sqlite3
 db.sqlite3
 
+# User uploads live in a volume, never in the image
+local_storage/
+
 # Secrets — never bake these into the image
 backend/.env
 .env
