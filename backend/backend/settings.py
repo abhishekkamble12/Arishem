@@ -4,17 +4,11 @@ All secrets and environment-specific values come from environment variables.
 Never hardcode credentials here.
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
-from decouple import config
 
-# Export AWS credentials from .env to environment variables for boto3/botocore
-# Trigger reload: env updated with Claude Sonnet 4.6 model ID.
-for _env_var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"]:
-    _val = config(_env_var, default=None)
-    if _val:
-        os.environ[_env_var] = _val
+from decouple import config
 
 # Export Groq credentials
 _groq_key = config("GROQ_API_KEY", default=None)
@@ -66,8 +60,20 @@ MIDDLEWARE = [
     "app.middleware.RequestLoggingMiddleware",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+# Browser origins allowed to call the API (comma-separated, no wildcard).
+# Auth is a Bearer token in a header, not a cookie, so credentials aren't needed.
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in config("CORS_ALLOWED_ORIGINS", default="http://localhost:5173").split(",") if o.strip()
+]
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
+    SECURE_REDIRECT_EXEMPT = [r"^app/health$"]  # container/LB health checks arrive over plain HTTP
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # behind the host's TLS proxy
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 # Disable redirect from /path to /path/ — our URLs have no trailing slashes
 # and POST bodies are lost on 301 redirects in many clients.
@@ -92,29 +98,19 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "backend.wsgi.application"
 
-# ── Database (AWS RDS MySQL in production, SQLite in CI) ──────────────────────
-_db_engine = config("DB_ENGINE", default="django.db.backends.sqlite3")
+# ── Database ──────────────────────────────────────────────────────────────────
+# DATABASE_URL (e.g. postgres://user:pass@host:5432/dbname?sslmode=require) is the
+# managed-Postgres path. Unset, it falls back to a local SQLite file for development.
+_database_url = config("DATABASE_URL", default="")
+if _database_url:
+    import dj_database_url
 
-if _db_engine == "django.db.backends.sqlite3":
+    DATABASES = {"default": dj_database_url.parse(_database_url, conn_max_age=60, conn_health_checks=True)}
+else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": config("DB_NAME", default=BASE_DIR / "db.sqlite3"),
-        }
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.mysql",
-            "NAME": config("DB_NAME"),
-            "USER": config("DB_USER"),
-            "PASSWORD": config("DB_PASSWORD"),
-            "HOST": config("DB_HOST"),
-            "PORT": config("DB_PORT", default="3306"),
-            "OPTIONS": {
-                "charset": "utf8mb4",
-                "connect_timeout": 10,
-            },
         }
     }
 
@@ -157,6 +153,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "cost_control": "100/min",
+        "auth": config("THROTTLE_RATE_AUTH", default="20/min"),
     },
 }
 
@@ -211,6 +208,52 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
+# Periodic jobs (run by `celery -A backend beat`)
+CELERY_BEAT_SCHEDULE = {
+    "reconcile-stuck-ingestions": {
+        "task": "app.tasks.reconcile_stuck_ingestions",
+        "schedule": 600.0,  # every 10 minutes
+    },
+}
+
 # Ingestion Queue Limits (Backpressure management)
 MAX_INGESTION_QUEUE_DEPTH = config("MAX_INGESTION_QUEUE_DEPTH", default=50, cast=int)
 
+
+# ── Optional features (off for the first deployment) ──────────────────────────
+# Code stays in the repo; only routes and accepted file types are gated.
+# Meetings needs `pip install -r requirements-optional.txt` (Whisper, yt-dlp, ffmpeg).
+ENABLE_MEETINGS = config("ENABLE_MEETINGS", default=False, cast=bool)
+ENABLE_SOCIAL_AUTH = config("ENABLE_SOCIAL_AUTH", default=False, cast=bool)
+
+# ── Object storage ────────────────────────────────────────────────────────────
+STORAGE_BACKEND = config("STORAGE_BACKEND", default="local")  # "local" | "s3"
+OBJECT_STORAGE_BUCKET = config("OBJECT_STORAGE_BUCKET", default="arishem-documents")
+OBJECT_STORAGE_ENDPOINT_URL = config("OBJECT_STORAGE_ENDPOINT_URL", default="")
+OBJECT_STORAGE_ACCESS_KEY_ID = config("OBJECT_STORAGE_ACCESS_KEY_ID", default="")
+OBJECT_STORAGE_SECRET_ACCESS_KEY = config("OBJECT_STORAGE_SECRET_ACCESS_KEY", default="")
+OBJECT_STORAGE_REGION = config("OBJECT_STORAGE_REGION", default="us-east-1")
+if STORAGE_BACKEND not in ("local", "s3"):
+    raise ValueError("STORAGE_BACKEND must be 'local' or 's3'")
+
+# ── Signup, input and cost limits ─────────────────────────────────────────────
+# Self-registered users get this role in their own personal workspace. Every
+# endpoint checks workspace membership, so an editor cannot touch another
+# tenant's data. Use "viewer" for a closed deployment where admins promote users.
+SIGNUP_ROLE = config("SIGNUP_ROLE", default="editor")
+if SIGNUP_ROLE not in ("viewer", "editor"):
+    raise ValueError("SIGNUP_ROLE must be 'viewer' or 'editor' (admins are promoted by an admin)")
+
+MAX_QUESTION_CHARS = config("MAX_QUESTION_CHARS", default=1000, cast=int)
+MAX_TOP_K = config("MAX_TOP_K", default=10, cast=int)
+MAX_UPLOAD_MB = config("MAX_UPLOAD_MB", default=25, cast=int)
+# Per-user daily cap on /ai/query (each query can cost up to 4 LLM calls).
+# Counted from PredictionLog, so it survives restarts and works across workers.
+DAILY_QUERY_QUOTA = config("DAILY_QUERY_QUOTA", default=100, cast=int)
+
+# ── Cache (throttle counters) ─────────────────────────────────────────────────
+# Per-process memory by default; set CACHE_URL=redis://host:6379/2 so rate limits
+# are shared across Gunicorn workers and survive restarts.
+_cache_url = config("CACHE_URL", default="")
+if _cache_url:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": _cache_url}}
