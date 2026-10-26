@@ -102,6 +102,37 @@ cat /var/log/arishem-bootstrap.log     # what happened at first boot
 
 Caddy requests the certificate on start, so DNS must resolve first.
 
+### Turning on Google sign-in
+
+The code is already in place on both sides: the React button, the `/app/auth/google`
+endpoint that verifies the ID token, and the account-linking rules (verified email
+only, case-insensitive match). What it needs is an OAuth client that Google will
+accept requests from.
+
+**Google will not accept the IP-only deployment.** Authorised JavaScript origins
+must be `https://` on a real domain; plain `http://` is allowed only for
+`localhost`, and raw IP addresses are rejected outright. So Google sign-in in
+production needs the domain and certificate from the previous section first.
+
+1. Google Cloud console → **APIs & Services → Credentials → Create credentials →
+   OAuth client ID**, type **Web application**. (Or open the existing client whose ID
+   is in `frontend/.env`.)
+2. Under **Authorised JavaScript origins** add `http://localhost:5173` for local
+   development and `https://yourdomain.com` for production. The button uses origins,
+   not redirect URIs, so the redirect list can stay empty.
+3. Put the client ID in `frontend/.env` as `VITE_GOOGLE_CLIENT_ID` and in
+   `backend/backend/.env` as `GOOGLE_CLIENT_ID`. They must be the same value: the
+   backend rejects any token whose audience is not this client.
+4. For a deployment, pass it through: `./deploy/deploy.ps1 -AlertEmail … -DomainName
+   yourdomain.com -GoogleClientId <client-id>`. It is baked into the frontend at
+   build time, because Vite inlines environment variables, so a change needs a
+   rebuild rather than a restart.
+
+The client ID is a public identifier, not a secret; it is visible in the browser
+anyway. There is no client secret in this flow, because the backend only verifies a
+signed ID token. If the button shows `origin_mismatch`, the origin in step 2 is
+missing or does not match the address bar exactly, including the port.
+
 ### Tearing it down
 
 ```powershell

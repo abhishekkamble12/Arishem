@@ -21,10 +21,10 @@ measured, and this README does not claim it.
 | | |
 |---|---|
 | Deployed and tested on AWS | **32/32 checks passed** over the network against a live stack, then torn down — [docs/DEPLOYMENT_VERIFICATION.md](docs/DEPLOYMENT_VERIFICATION.md) |
-| Faithfulness (RAGAS) | **1.00** on 28 answered golden-set questions — but saturated; see [Evaluation](#evaluation) |
-| Refusal accuracy | **30/30**: all 28 answerable questions answered, both unanswerable ones refused |
-| Answer relevancy (RAGAS) | 0.71 answered-only — mostly a length signal here, not quality; see [Evaluation](#evaluation) |
-| Tests | 97, all offline (vector store, LLM and S3 faked), 79% line coverage of `app/` + `Services/` |
+| Retrieval, hard suite | **hit@5 52/53, MRR 0.895** over 9 documents — the one miss is a paraphrase; see [Evaluation](#evaluation) |
+| Faithfulness (RAGAS), easy suite | **1.00** on 28 answered questions — saturated, which is why the hard suite exists |
+| Refusal accuracy, easy suite | **30/30** — but with only 2 unanswerable questions; the hard suite has 19 |
+| Tests | 98 backend + 21 for the eval's scoring rules, all offline; **68% line coverage** of application code (tests and migrations excluded) |
 | Query latency, deployed | **16.0 s** per answered query in agentic mode (3 sequential Groq calls) |
 | Tokens per answered query | **1,041 in + 449 out** on the deployed system |
 | Deployment cost | **~\$14.69/month** on AWS, from live Pricing API rates — see [docs/DEPLOY.md](docs/DEPLOY.md) |
@@ -115,67 +115,102 @@ workspace being acted on (`app/utils.py: resolve_workspace`).
 
 ## Evaluation
 
-`evals/run_eval.py` indexes three policy documents (PDF, TXT, MD) into an in-memory
-Qdrant using the production chunking settings, runs a 30-question golden set
-([`evals/golden_set.json`](evals/golden_set.json)) through the real query pipeline,
-and scores the answers with RAGAS. Full results: [`evals/SCORECARD.md`](evals/SCORECARD.md),
-per question in [`evals/eval_results.json`](evals/eval_results.json).
+There are two suites. The easy one is finished and saturated. The hard one replaced
+it, and its generation-dependent half is not finished yet — the reasons are below.
+
+### The hard suite (current harness)
+
+72 questions over 9 documents (19 chunks, so retrieval picks 5 of 19), in
+[`evals/golden_set.json`](evals/golden_set.json). The documents are synthetic
+fixtures, built so that facts collide: four retention periods, part-time and
+full-time leave side by side, two approvals for the payments service against one
+everywhere else, and a vendor FAQ carrying a prompt injection in an HTML comment.
+
+| Category | n | What it tests |
+|---|---|---|
+| single fact | 28 | the original questions, now competing with distractors |
+| distractor | 10 | a near-identical fact sits in another document |
+| multi-hop | 7 | needs two clauses, often from two documents |
+| paraphrase | 6 | little or no keyword overlap with the source |
+| injection | 2 | a document tries to hijack the answer |
+| unanswerable, in-domain | 16 | sounds covered and is not ("how many *sick* days carry over?") |
+| unanswerable, out-of-domain | 3 | capital of France, arithmetic |
+
+Each question is labelled with the documents retrieval should surface and the facts
+a correct answer must contain, so most metrics need no LLM
+([`evals/metrics.py`](evals/metrics.py), 21 unit tests run in CI): key-fact
+correctness, retrieval hit@k / MRR / recall, abstention precision and recall, and
+injection resistance. Faithfulness is judged by `qwen/qwen3.8-27b`, a different
+model family from the `gpt-oss-20b` generator.
+
+**Measured so far — retrieval, which needs no LLM:**
+
+| | |
+|---|---|
+| Hit@5 | **52/53** answerable questions |
+| MRR | **0.895** |
+| Recall of all needed documents | 0.981 (matters for multi-hop) |
+| The miss | *"On which days of the week does new code get released to customers?"* — the source says "production deployments happen every Tuesday and Thursday", sharing almost no words with the question |
+
+**What it showed about the refusal threshold.** On this corpus, answerable questions
+score 0.15–0.55 and unanswerable ones 0.02–0.49. Those ranges overlap, so **no
+threshold separates them**: 17 of the 19 unanswerable questions clear the current
+0.065. The threshold can only stop clearly off-topic questions. A plausible
+in-domain question like *"How long are Slack messages retained?"* has to be declined
+by the model itself, which is what the abstention metrics measure.
+
+It also showed that the threshold is corpus-dependent. Confidence is the *mean*
+similarity of the top 5 chunks, and on the old four-chunk corpus every query was
+forced to include irrelevant chunks, which dragged that mean down. Answerable
+questions averaged about 0.2 there and about 0.37 here. So the 0.065 fitted on the
+easy suite was a property of that corpus, not of the system. The maximum, rather
+than the mean, would be the more robust signal, and that is a change still to make.
+
+**Not yet measured:** correctness, abstention, faithfulness and injection
+resistance. These need the generator, and Groq's free tier allows 200,000 tokens
+per model per day. The day's earlier runs had used most of it, and generation
+stopped at 199,531 tokens with 18 of 72 answers saved. The harness is resumable, so
+the same command continues from question 19 once the window resets. No partial
+numbers are published here, because a partial run would invite reading 18
+questions as if they were 72.
+
+```bash
+pip install -r backend/requirements-optional.txt   # ragas is not a runtime dependency
+python evals/run_eval.py                           # generate, judge, report; resumes if interrupted
+EVAL_SKIP_JUDGE=1  python evals/run_eval.py        # deterministic metrics only, no judge tokens
+EVAL_REPORT_ONLY=1 python evals/run_eval.py        # rebuild the scorecard, no model calls
+python evals/judge_control.py                      # check the judge can fail before trusting it
+python -m unittest discover -s evals               # the metrics' own tests
+```
+
+### The easy suite (complete)
+
+30 single-fact questions over 3 documents, in
+[`evals/SCORECARD.md`](evals/SCORECARD.md). Every query retrieved the whole corpus,
+and there were only two unanswerable questions.
 
 | | Answered only (28) |
 |---|---|
 | Faithfulness | **1.00** |
 | Answer relevancy | 0.71 |
-| Refusals | 2/30 — exactly the two questions the corpus cannot answer |
-| Latency | median 14.7 s, p95 23.2 s |
+| Refusals | 2/30, exactly the two unanswerable questions |
 
-Generator `openai/gpt-oss-20b`, judge `qwen/qwen3.8-27b` — deliberately a different
-model family, so the judge is not grading its own output.
+**The first run of this suite refused 29 of 30 questions.** The threshold (0.35) had
+been inherited from a retired embedding model, and answerable questions scored
+0.072–0.376, so almost everything fell below it. Lowering it to 0.065 fixed that.
 
-**What the first run found.** It refused **29 of 30** questions, including ones the
-corpus answers verbatim, and scored faithfulness 0.00 because almost nothing was
-answered. The refusal threshold (0.35) had been inherited from a retired embedding
-model. Answerable questions actually score 0.072–0.376 and unanswerable ones
-−0.003–0.059, so 0.35 was rejecting nearly everything. The harness now prints a
-threshold sweep — retrieval confidence does not depend on the threshold, so one run
-gives the whole curve — and the default is 0.065, the midpoint of the gap. That is
-fitted on two negative examples, which is thin: widen the golden set before
-trusting a more precise value.
+**Faithfulness 1.00 is real, but it does not tell you much.** A score that never
+drops below 1.0 cannot by itself tell "the system does not hallucinate" apart from "the judge
+passes everything", so [`evals/judge_control.py`](evals/judge_control.py) feeds the
+same judge answers with known defects: it scores a faithful one 1.00, a fabricated
+one 0.00 and a half-fabricated one 0.50. The 1.0 is genuine; the questions were too
+easy to fail. **Answer relevancy measured length** (r = +0.71 with word count; a
+correct `uv` scored 0.086), so it is not used in the hard suite.
 
-**How to read the numbers.** Both need a caveat, and the scorecard prints them:
-
-- **Faithfulness is saturated, and it is real.** A score that never drops below 1.0
-  cannot by itself tell "the system does not hallucinate" from "the judge passes
-  everything", so [`evals/judge_control.py`](evals/judge_control.py) feeds the same
-  judge answers with known defects. It scores a faithful answer 1.00, a fabricated
-  one 0.00, a half-fabricated one 0.50 and a wrong figure 0.00. So the 1.0 is
-  genuine — but the questions are single-fact lookups over a corpus small enough
-  that every query retrieves all of it. It shows the system does not hallucinate on
-  easy questions, and says nothing about hard ones.
-- **Answer relevancy is mostly measuring length.** It correlates +0.71 with answer
-  word count: answers of four words or fewer average 0.29 even though every one is
-  correct (`uv` scores 0.086), while longer answers average 0.88. RAGAS scores
-  relevancy by regenerating the question from the answer, which a correct one-word
-  answer cannot do.
-- `context_precision` and `context_recall` are not reported. With four chunks and
-  `top_k=5`, every query retrieves the whole corpus, so they have nothing to
-  discriminate between.
-
-```bash
-pip install -r backend/requirements-optional.txt     # ragas is not a runtime dependency
-python evals/run_eval.py                             # generate, cache answers, score
-EVAL_REUSE_ANSWERS=1 python evals/run_eval.py        # rescore the cache, no generation
-EVAL_REPORT_ONLY=1   python evals/run_eval.py        # rebuild the report, no model calls
-python evals/judge_control.py                        # check the judge can fail
-```
-
-Generation, scoring and reporting are separate because a free Groq tier caps tokens
-per day, and four metrics over 30 questions exhausted it mid-run.
-
-An earlier `SCORECARD.md` in this repo reported faithfulness 0.9231 and three
-similar figures. Those were not reproducible: `ragas` was in no requirements file,
-Django was never configured so the harness could not even import, the judge model
-it named had been retired, and the "PDF" in the corpus was a text file. It was
-deleted rather than left to imply a result that was never produced.
+An earlier `SCORECARD.md` reported faithfulness 0.9231 and three similar figures.
+They were not reproducible — `ragas` was in no requirements file, Django was never
+configured so the harness could not import, the judge model had been retired, and
+the "PDF" in the corpus was a text file — and it was deleted.
 
 ## Running it
 
@@ -217,9 +252,12 @@ cd backend
 python manage.py test --settings=backend.test_settings
 ```
 
-97 tests, all offline: the vector store, LLM and S3 are replaced with fakes, so no
-test needs a network call or an API key. CI runs them with coverage on every push
-(79% line coverage of `app/` and `Services/`). They cover:
+98 backend tests, all offline: the vector store, LLM and S3 are replaced with fakes,
+so no test needs a network call or an API key. CI runs them with coverage on every
+push: **68% line coverage** of `app/` and `Services/`, with test files and migrations
+excluded. (An earlier version of this README said 79%; that figure counted the test
+files themselves, which always cover themselves fully.) The least-covered code is the
+optional Meetings feature, which is off by default: 13–39%. They cover:
 
 - auth, JWT and per-workspace roles, including that a sign-up cannot grant itself a
   role, that a role in one workspace grants nothing in another, and that a workspace
@@ -313,13 +351,13 @@ The template is validated (`validate-template` and `cfn-lint`, no findings) but
 
 ## Known limitations
 
-- **The evaluation set is too easy.** Faithfulness is at its ceiling because every
-  question is a single-fact lookup over four chunks. It needs multi-hop questions, a
-  larger corpus where retrieval actually has to choose, and many more unanswerable
-  questions before it can tell a good change from a bad one. This is the biggest gap.
+- **The hard evaluation suite has only half-run.** Retrieval is measured; correctness,
+  abstention, faithfulness and injection resistance are waiting on Groq's daily token
+  allowance. This is the biggest gap.
+- **The refusal threshold cannot separate in-domain unanswerable questions**, because
+  their confidence overlaps with answerable ones. It relies on the model declining,
+  and it is a mean over the top-k, which makes it corpus-dependent.
 - **No prompt-injection guard.** A document can carry instructions into the prompt.
-- The refusal threshold (0.065) is fitted on 28 answerable and only 2 unanswerable
-  questions. The gap it sits in is real but narrow (0.059 to 0.072).
 - 16 s per answer is slow for a chat interface. The cause is agentic mode's three
   sequential LLM calls; single-pass mode is roughly a third of that, with its
   quality cost not yet measured.
