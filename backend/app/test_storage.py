@@ -41,3 +41,28 @@ class S3BackendTests(SimpleTestCase):
             with open(path, "rb") as fh:
                 self.assertEqual(fh.read(), b"hello")
         self.assertFalse(os.path.exists(path))
+
+    def test_missing_object_raises_filenotfounderror_like_the_local_backend(self):
+        """
+        Verified against real S3: boto raises ClientError 404 here, so without
+        translation the two backends fail differently for the same cause and the
+        caller sees a boto traceback instead of a readable message.
+        """
+        from botocore.exceptions import ClientError
+
+        self.s3.download_file.side_effect = ClientError(
+            {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
+        )
+        with self.assertRaises(FileNotFoundError):
+            with storage.local_copy("ws_1/missing.pdf"):
+                pass
+
+    def test_other_s3_errors_are_not_disguised_as_missing_files(self):
+        from botocore.exceptions import ClientError
+
+        self.s3.download_file.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "nope"}}, "GetObject"
+        )
+        with self.assertRaises(ClientError):
+            with storage.local_copy("ws_1/forbidden.pdf"):
+                pass

@@ -138,7 +138,16 @@ def local_copy(key: str):
     fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     try:
-        _s3().download_file(settings.OBJECT_STORAGE_BUCKET, key, tmp_path)
+        try:
+            _s3().download_file(settings.OBJECT_STORAGE_BUCKET, key, tmp_path)
+        except Exception as exc:
+            # Both backends must fail the same way for the same cause, or the
+            # caller's error handling only works on one of them. boto raises
+            # ClientError 404/NoSuchKey where the local backend raises OSError.
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+            if code in ("404", "NoSuchKey"):
+                raise FileNotFoundError(f"File not found: {key}") from exc
+            raise
         yield tmp_path
     finally:
         try:
