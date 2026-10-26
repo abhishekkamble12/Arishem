@@ -14,7 +14,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import dotenv
 
-dotenv.load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend", ".env")))
+# The backend reads backend/backend/.env (python-decouple searches upward from
+# settings.py), so load the same file here rather than a path that never existed.
+dotenv.load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend", "backend", ".env")))
+
+# Services.storage reads settings.BASE_DIR at import time, so Django has to be
+# configured before anything under Services is imported. Without this the harness
+# cannot even start.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
+os.environ.setdefault("SECRET_KEY", "eval-harness-only")
+
+import django
+
+django.setup()
 
 import Services.agent as agent_mod
 import Services.Ai_service.embedding as embedding_mod
@@ -30,6 +42,7 @@ CONFIDENCE_THRESHOLD = 0.35
 TOP_K = agent_mod.TOP_K
 # Mirrors Services/Extractor.py — kept local because importing it requires Django
 CHUNK_SIZE, CHUNK_OVERLAP = 800, 150
+JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "openai/gpt-oss-120b")
 
 agent_mod.CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -191,7 +204,6 @@ async def main():
 
     from langchain_groq import ChatGroq
 
-    # Wait, ragas requires specific wrappers depending on the version
     print("Importing ragas...")
     from ragas import evaluate
     from ragas.metrics import (
@@ -207,7 +219,10 @@ async def main():
     except ImportError:
         wrapper_available = False
 
-    eval_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    # The judge should be at least as strong as the generator, and must be a model
+    # Groq still serves: the previous id here was retired, which is one of the two
+    # reasons this harness could not run.
+    eval_llm = ChatGroq(model=JUDGE_MODEL, temperature=0, timeout=60, max_retries=5)
 
     if wrapper_available:
         ragas_llm = LangchainLLMWrapper(eval_llm)
@@ -264,12 +279,19 @@ async def main():
 
     print("Running ragas evaluation... (this will take a few minutes)")
     try:
+        # ragas fans out one request per metric per row by default, which a free
+        # Groq tier answers with a wall of 429s. Four metrics over 30 questions is
+        # only ~120 judge calls, so serialising them costs minutes and actually
+        # finishes, where the default concurrency thrashes on retries.
+        from ragas.run_config import RunConfig
+
         results = evaluate(
             dataset,
             metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
             llm=ragas_llm,
             embeddings=ragas_embeddings,
             raise_exceptions=False,
+            run_config=RunConfig(max_workers=int(os.getenv("EVAL_MAX_WORKERS", "2")), timeout=180),
         )
 
         print("Evaluation complete!")
