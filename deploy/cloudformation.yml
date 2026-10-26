@@ -56,6 +56,13 @@ Parameters:
     Description: >
       Optional. With a domain whose DNS already points at this stack's Elastic IP,
       Caddy gets a free Let's Encrypt certificate. Left empty, the site is HTTP only.
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: >
+      Optional OAuth 2.0 Web client ID for Google sign-in. A public identifier,
+      not a secret, which is why it is a plain parameter. Left empty,
+      /auth/google answers 503 and email sign-in still works.
 
 Conditions:
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
@@ -216,6 +223,7 @@ Resources:
             SITE_ADDRESS=${SiteAddress}
             PUBLIC_ORIGIN=${PublicOrigin}
             SECURE_SSL_REDIRECT=${SslRedirect}
+            GOOGLE_CLIENT_ID=${GoogleClientId}
             ENVEOF
             chmod 600 /opt/arishem/.env
 

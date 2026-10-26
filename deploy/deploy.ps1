@@ -21,6 +21,7 @@ param(
     [string]$InstanceType = 't4g.small',
     [ValidateSet('arm64', 'x86_64')][string]$Architecture = 'arm64',
     [string]$DomainName = '',
+    [string]$GoogleClientId = '',
     [int]$MonthlyBudgetUSD = 15,
     [string]$RepoUrl = 'https://github.com/abhishekkamble12/Arishem.git',
     [string]$RepoBranch = 'main'
@@ -80,6 +81,7 @@ aws cloudformation deploy `
         InstanceType=$InstanceType `
         Architecture=$Architecture `
         DomainName=$DomainName `
+        GoogleClientId=$GoogleClientId `
         MonthlyBudgetUSD=$MonthlyBudgetUSD `
         RepoUrl=$RepoUrl `
         RepoBranch=$RepoBranch

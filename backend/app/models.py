@@ -1,3 +1,6 @@
+import re
+import uuid
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -11,6 +14,31 @@ ALL_ROLES   = [ROLE_ADMIN, ROLE_EDITOR, ROLE_VIEWER]
 
 ROLE_RANK = {ROLE_VIEWER: 0, ROLE_EDITOR: 1, ROLE_ADMIN: 2}
 EDIT_ROLES = (ROLE_ADMIN, ROLE_EDITOR)
+
+_USERNAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def unique_username(email: str) -> str:
+    """
+    A free username derived from an email's local part.
+
+    `username` is still unique on the user model, so deriving it from the local
+    part alone collides for a@one.com and a@two.com — which raised IntegrityError
+    (a 500) on the second signup, whether by password or by Google.
+    """
+    from django.contrib.auth import get_user_model
+
+    base = _USERNAME_SAFE.sub("_", email.split("@")[0]).strip("._") or "user"
+    base = base[:140]  # leave room for the suffix inside username's 150 chars
+    user_model = get_user_model()
+
+    if not user_model.objects.filter(username=base).exists():
+        return base
+    for n in range(2, 100):
+        candidate = f"{base}{n}"
+        if not user_model.objects.filter(username=candidate).exists():
+            return candidate
+    return f"{base}{uuid.uuid4().hex[:8]}"
 
 
 class Workspace(models.Model):

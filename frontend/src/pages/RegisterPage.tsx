@@ -202,7 +202,7 @@ export const RegisterPage: React.FC = () => {
             </Link>
           </div>
 
-          {FEATURES.socialAuth && (
+          {FEATURES.googleAuth && (
           <div className="mt-6 flex flex-col gap-4">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">

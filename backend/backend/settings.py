@@ -231,7 +231,11 @@ MAX_INGESTION_QUEUE_DEPTH = config("MAX_INGESTION_QUEUE_DEPTH", default=50, cast
 # Code stays in the repo; only routes and accepted file types are gated.
 # Meetings needs `pip install -r requirements-optional.txt` (Whisper, yt-dlp, ffmpeg).
 ENABLE_MEETINGS = config("ENABLE_MEETINGS", default=False, cast=bool)
-ENABLE_SOCIAL_AUTH = config("ENABLE_SOCIAL_AUTH", default=False, cast=bool)
+# Social sign-in is on by default: the endpoints answer 503 with a readable
+# message until GOOGLE_CLIENT_ID / GITHUB_* are set, so enabling it costs nothing
+# and the login page's buttons are not wired to routes that do not exist.
+ENABLE_SOCIAL_AUTH = config("ENABLE_SOCIAL_AUTH", default=True, cast=bool)
+GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID", default=config("google_client_id", default=""))
 
 # ── Object storage ────────────────────────────────────────────────────────────
 STORAGE_BACKEND = config("STORAGE_BACKEND", default="local")  # "local" | "s3"

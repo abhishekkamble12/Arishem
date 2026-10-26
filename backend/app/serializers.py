@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .models import ALL_ROLES, ROLE_ADMIN, Membership, Workspace
+from .models import ALL_ROLES, ROLE_ADMIN, Membership, Workspace, unique_username
 
 User = get_user_model()
 
@@ -51,7 +51,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        username = validated_data.get("username") or validated_data["email"].split("@")[0]
+        # Derived usernames collide across domains (a@one.com, a@two.com), which
+        # used to surface as a 500 from the unique constraint.
+        username = validated_data.get("username") or unique_username(validated_data["email"])
 
         user = User.objects.create_user(
             email    = validated_data["email"],

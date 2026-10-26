@@ -27,6 +27,9 @@ x-app: &app
     CELERY_RESULT_BACKEND: redis://redis:6379/1
     CACHE_URL: redis://redis:6379/2
     GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY}
+    # Empty is fine: /auth/google then answers 503 instead of verifying tokens
+    # against an empty audience.
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   depends_on: &app-deps
     postgres: {condition: service_healthy}
     redis: {condition: service_healthy}
@@ -97,7 +100,9 @@ services:
   web:
     build:
       context: ./frontend
-      args: {VITE_API_URL: /app}
+      args:
+        VITE_API_URL: /app
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     restart: unless-stopped
     ports: ["80:80", "443:443"]
     environment:
