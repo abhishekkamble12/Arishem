@@ -48,6 +48,36 @@ jobs:
         working-directory: evals
         run: python -m unittest discover -p "test_*.py" -v
 
+  # Nothing checked the frontend before, which is how 41 type errors, an ESLint that
+  # was never installed, and 13 npm advisories all went unnoticed.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"   # Vite 8 needs 20.19+ or 22.12+
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check and build
+        run: npm run build
+
+      # High and critical only: a moderate advisory published overnight should not
+      # turn an unrelated change red.
+      - name: No high or critical advisories
+        run: npm audit --audit-level=high
+
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
