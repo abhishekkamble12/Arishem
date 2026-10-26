@@ -1,0 +1,24 @@
+# SITE_ADDRESS is ":80" without a domain, or the domain itself — in which case
+# Caddy obtains and renews a Let's Encrypt certificate on its own.
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# The API. Same origin as the SPA, so the browser never makes a CORS request.
+	handle /app/* {
+		reverse_proxy api:8000
+	}
+
+	# Django's own static files (admin, DRF browsable API) come from the volume
+	# the API container populated at build time.
+	handle_path /static/* {
+		root * /srv/django-static
+		file_server
+	}
+
+	# Everything else is the SPA; unknown paths fall through to its router.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,0 +1,127 @@
+# Deploying Arishem to AWS
+
+One CloudFormation stack puts the whole system on a single small EC2 instance:
+Postgres, Redis and Qdrant as containers, documents in S3, Caddy terminating TLS.
+
+## What it costs
+
+Prices below are the live on-demand rates for **ap-south-1 (Mumbai)**, read from
+the AWS Pricing API on 2026-10-26. They are list prices, not a bill you have seen.
+
+| Item | Rate | Monthly |
+|---|---|---|
+| EC2 `t4g.small` (2 vCPU, 2 GiB, ARM) | $0.0112/hr | **$8.18** |
+| EBS gp3 root volume, 30 GiB | $0.0912/GB-mo | **$2.74** |
+| Public IPv4 address (in use) | $0.005/hr | **$3.65** |
+| S3 Standard, ~5 GiB of documents | $0.025/GB-mo | **$0.12** |
+| CloudFormation, IAM, Budgets, Parameter Store, Session Manager | — | **$0.00** |
+| | | **≈ $14.69/month** |
+
+Notes that actually matter for the bill:
+
+- **Data transfer out** is the usual surprise. The first 100 GB/month across AWS
+  is free, which a demo will not come close to.
+- **Stopping the instance** saves the $8.18 but not the volume or the IP, so an
+  idle stack still costs about $6.40/month. Delete the stack to stop all of it.
+- **The address is billed even when idle**, so a stopped instance with an Elastic
+  IP keeps charging. This is why the stack has no "pause" button worth using.
+- Choosing `t3.small` instead doubles the compute line to $16.35 and takes the
+  total to roughly $22.86. Only do that if you need x86.
+
+The stack creates an **AWS Budget** that emails you at 80% of actual and 100% of
+forecast spend. That is a notification, not a cap: AWS will not stop the
+resources for you.
+
+## Why this shape
+
+The expensive habits in a "production" AWS diagram are a load balancer (~$16/mo),
+a NAT gateway (~$32/mo), RDS (~$12/mo and up) and ElastiCache. This stack has none
+of them, and for a system with one instance it loses nothing real:
+
+- **No ALB.** Caddy on the box terminates TLS and gets a free Let's Encrypt
+  certificate. A load balancer with one target behind it is just a bill.
+- **No NAT gateway.** The instance sits in a public subnet with a security group
+  that allows only 80 and 443 inbound.
+- **No RDS or ElastiCache.** Postgres and Redis are containers on the same box
+  with a persistent volume.
+- **No SSH port and no key pair.** Shell access is through SSM Session Manager,
+  which is audited and needs no open port.
+- **Secrets live in SSM Parameter Store** as SecureStrings. They are not in the
+  template, the AMI, the repository or the instance's user data.
+
+When you outgrow it: move Postgres to RDS, Qdrant to Qdrant Cloud, and put the
+API behind an ALB with an autoscaling group. The compose file is the seam.
+
+## Deploying
+
+Prerequisites: the AWS CLI, credentials in the repository `.env`, and a
+`GROQ_API_KEY` in the same file.
+
+```powershell
+./deploy/deploy.ps1 -AlertEmail you@example.com
+```
+
+The script stores the secrets in Parameter Store, generates a production
+`SECRET_KEY` the first time (and reuses it afterwards, so sessions survive a
+redeploy), then creates the stack. First run takes 15–30 minutes, most of it
+building the backend image, since torch and the embedding model are large.
+
+The stack only reports success once the API answers its own health check, so a
+`CREATE_COMPLETE` means the application is actually running.
+
+Useful switches:
+
+| Switch | Default | Why |
+|---|---|---|
+| `-Region` | `ap-south-1` | Closest to you; change it and the price table moves. |
+| `-InstanceType` / `-Architecture` | `t4g.small` / `arm64` | Keep these consistent: `t4g.*` is arm64, `t3.*` is x86_64. |
+| `-DomainName` | none | With DNS already pointing at the stack's Elastic IP, Caddy issues a certificate and the site becomes HTTPS. |
+| `-MonthlyBudgetUSD` | `20` | Above the ~$15 steady state, so 80% is a warning. |
+
+## After it is up
+
+```powershell
+# the site, the bucket, and a shell command
+aws cloudformation describe-stacks --stack-name arishem `
+  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output table
+
+# shell on the box, no SSH
+aws ssm start-session --target <InstanceId> --region ap-south-1
+
+# on the box
+cd /opt/arishem
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f api
+cat /var/log/arishem-bootstrap.log     # what happened at first boot
+```
+
+### Adding a domain
+
+1. Point an A record at the stack's `ElasticIPAddress` output.
+2. Redeploy with `-DomainName yourdomain.com`.
+
+Caddy requests the certificate on start, so DNS must resolve first.
+
+### Tearing it down
+
+```powershell
+aws cloudformation delete-stack --stack-name arishem --region ap-south-1
+```
+
+The S3 bucket is `Retain`, so your documents survive the stack. Delete it by
+hand once you are sure:
+
+```powershell
+aws s3 rb s3://<DocumentsBucketName> --force
+```
+
+## Known gaps
+
+- **The refusal threshold is not calibrated for a real corpus.** `RAG_CONFIDENCE_THRESHOLD`
+  defaults to 0.35 in code. Measured retrieval scores on a small test corpus ran
+  0.19–0.32, which would make the deployed system refuse good questions. Upload a
+  real corpus, look at the scores in `PredictionLog`, then set the value
+  deliberately. Until that is done, treat the number as a guess.
+- **No backups.** Postgres and Qdrant live on one EBS volume with no snapshot
+  schedule. Add one before this holds anything you care about.
+- **One instance is one point of failure.** A reboot is downtime.

@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Arishem — multi-tenant RAG backend on a single EC2 instance running Docker Compose,
+  with S3 for documents. Deliberately avoids the expensive managed pieces (ALB, NAT
+  gateway, RDS, ElastiCache) because one small box runs the whole stack for a demo.
+  See docs/DEPLOY.md for the cost breakdown and when to outgrow this shape.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: {default: Size and cost}
+        Parameters: [InstanceType, Architecture, RootVolumeGiB, MonthlyBudgetUSD, AlertEmail]
+      - Label: {default: Application}
+        Parameters: [RepoUrl, RepoBranch, DomainName]
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium, t3.small, t3.medium]
+    Description: >
+      t4g.small (2 GiB, ARM) is the cheapest size the stack fits in. Use a t3.*
+      only if you need x86; it costs about twice as much for the same memory.
+  Architecture:
+    Type: String
+    Default: arm64
+    AllowedValues: [arm64, x86_64]
+    Description: Must match InstanceType — arm64 for t4g.*, x86_64 for t3.*.
+  RootVolumeGiB:
+    Type: Number
+    Default: 30
+    MinValue: 20
+    MaxValue: 100
+    Description: 30 GiB fits the Docker images (torch is large) with room for data.
+  MonthlyBudgetUSD:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: >
+      Emails you at 80% actual and 100% forecast spend. Budgets are free. The
+      default leaves headroom over the ~$15/month steady state so the 80%
+      threshold is a warning, not a greeting.
+  AlertEmail:
+    Type: String
+    AllowedPattern: ".+@.+\\..+"
+    Description: Where budget alerts go.
+  RepoUrl:
+    Type: String
+    Default: https://github.com/abhishekkamble12/Arishem.git
+  RepoBranch:
+    Type: String
+    Default: main
+  DomainName:
+    Type: String
+    Default: ""
+    Description: >
+      Optional. With a domain whose DNS already points at this stack's Elastic IP,
+      Caddy gets a free Let's Encrypt certificate. Left empty, the site is HTTP only.
+
+Conditions:
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+
+Resources:
+  # ── Documents ───────────────────────────────────────────────────────────────
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-docs-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          # Half-finished multipart uploads are invisible but still billed.
+          - Id: AbortIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 7}
+
+  # ── Instance identity ───────────────────────────────────────────────────────
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Shell access through Session Manager, so the stack opens no SSH port
+        # and needs no key pair.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: documents-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub "${DocumentsBucket.Arn}/*"
+              - Effect: Allow
+                Action: [s3:ListBucket, s3:GetBucketLocation]
+                Resource: !GetAtt DocumentsBucket.Arn
+        - PolicyName: read-app-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Secrets live in Parameter Store (free), never in this template.
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/arishem/*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ── Network ─────────────────────────────────────────────────────────────────
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Arishem web ingress (no SSH; use SSM Session Manager)
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS}
+
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIP.AllocationId
+      InstanceId: !Ref Instance
+
+  # ── The box ─────────────────────────────────────────────────────────────────
+  Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      # The stack only succeeds once the app answers its own health check.
+      ResourceSignal: {Count: 1, Timeout: PT40M}
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-${Architecture}}}"
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeGiB
+            VolumeType: gp3          # gp3 is cheaper than gp2 at the same size
+            DeleteOnTermination: true
+            Encrypted: true
+      MetadataOptions:
+        HttpTokens: required          # IMDSv2 only
+      Tags:
+        - {Key: Name, Value: !Ref AWS::StackName}
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -xo pipefail
+            exec > >(tee /var/log/arishem-bootstrap.log) 2>&1
+
+            # Whatever happens, tell CloudFormation rather than hanging for 40 minutes.
+            dnf install -y aws-cfn-bootstrap || true
+            signal() { /opt/aws/bin/cfn-signal -e "$1" --stack ${AWS::StackName} \
+                       --resource Instance --region ${AWS::Region} || true; }
+            trap 'signal 1' ERR
+
+            set -e
+            dnf update -y
+            dnf install -y docker git
+
+            # 4 GiB of swap: pip unpacking torch peaks well above 2 GiB of RAM.
+            if [ ! -f /swapfile ]; then
+              dd if=/dev/zero of=/swapfile bs=1M count=4096
+              chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+              echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            fi
+
+            systemctl enable --now docker
+            DOCKER_PLUGINS=/usr/local/lib/docker/cli-plugins
+            mkdir -p "$DOCKER_PLUGINS"
+            ARCH=$(uname -m)
+            curl -fsSL "https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-$ARCH" \
+                 -o "$DOCKER_PLUGINS/docker-compose"
+            chmod +x "$DOCKER_PLUGINS/docker-compose"
+
+            git clone --branch ${RepoBranch} --depth 1 ${RepoUrl} /opt/arishem
+            cd /opt/arishem
+
+            get_secret() { aws ssm get-parameter --with-decryption --region ${AWS::Region} \
+                           --name "$1" --query Parameter.Value --output text; }
+
+            # A Postgres password only ever used inside the Docker network.
+            DB_PASSWORD=$(openssl rand -hex 24)
+
+            cat > /opt/arishem/.env <<ENVEOF
+            SECRET_KEY=$(get_secret /arishem/secret_key)
+            GROQ_API_KEY=$(get_secret /arishem/groq_api_key)
+            DB_PASSWORD=$DB_PASSWORD
+            DATABASE_URL=postgres://arishem:$DB_PASSWORD@postgres:5432/arishem
+            OBJECT_STORAGE_BUCKET=${DocumentsBucket}
+            OBJECT_STORAGE_REGION=${AWS::Region}
+            PUBLIC_HOST=${PublicHost}
+            SITE_ADDRESS=${SiteAddress}
+            PUBLIC_ORIGIN=${PublicOrigin}
+            SECURE_SSL_REDIRECT=${SslRedirect}
+            ENVEOF
+            chmod 600 /opt/arishem/.env
+
+            docker compose -f docker-compose.prod.yml up -d --build
+
+            # The stack is only "up" when the API actually answers.
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost/app/health >/dev/null; then
+                signal 0; exit 0
+              fi
+              sleep 10
+            done
+            signal 1
+          - PublicHost: !Ref ElasticIP
+            SiteAddress: !If [HasDomain, !Ref DomainName, ":80"]
+            PublicOrigin: !If
+              - HasDomain
+              - !Sub "https://${DomainName}"
+              - !Sub "http://${ElasticIP}"
+            SslRedirect: !If [HasDomain, "True", "False"]
+
+  # ── Cost guardrail ──────────────────────────────────────────────────────────
+  Budget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${AWS::StackName}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: {Amount: !Ref MonthlyBudgetUSD, Unit: USD}
+      NotificationsWithSubscribers:
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref AlertEmail}]
+        - Notification: {NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref AlertEmail}]
+
+Outputs:
+  SiteUrl:
+    Description: Open this in a browser.
+    Value: !If [HasDomain, !Sub "https://${DomainName}", !Sub "http://${ElasticIP}"]
+  HealthUrl:
+    Value: !If
+      - HasDomain
+      - !Sub "https://${DomainName}/app/health"
+      - !Sub "http://${ElasticIP}/app/health"
+  ElasticIPAddress:
+    Description: Point your domain's A record here.
+    Value: !Ref ElasticIP
+  DocumentsBucketName:
+    Value: !Ref DocumentsBucket
+  ShellCommand:
+    Description: Shell on the box without SSH or a key pair.
+    Value: !Sub "aws ssm start-session --target ${Instance} --region ${AWS::Region}"

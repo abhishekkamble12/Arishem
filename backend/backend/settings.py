@@ -66,6 +66,13 @@ CORS_ALLOWED_ORIGINS = [
     o.strip() for o in config("CORS_ALLOWED_ORIGINS", default="http://localhost:5173").split(",") if o.strip()
 ]
 
+# Origins Django accepts POSTs from behind a TLS-terminating proxy. The API itself
+# authenticates with a Bearer token, but the admin and the DRF browsable API are
+# cookie-based and reject form posts without this.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in config("CSRF_TRUSTED_ORIGINS", default="").split(",") if o.strip()
+]
+
 if not DEBUG:
     SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
     SECURE_REDIRECT_EXEMPT = [r"^app/health$"]  # container/LB health checks arrive over plain HTTP
