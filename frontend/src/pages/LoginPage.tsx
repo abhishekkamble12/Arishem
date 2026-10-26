@@ -5,6 +5,7 @@ import { authApi } from '../api/auth';
 import { Mail, Lock, LogIn, Database, AlertCircle, UserPlus, User as UserIcon } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { FEATURES } from '../config';
+import { apiErrorMessage } from '../api/client';
 
 export const LoginPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
@@ -39,12 +40,8 @@ export const LoginPage: React.FC = () => {
       setAuth(response.user, response.tokens.access, response.tokens.refresh);
       refreshWorkspaces().catch(() => {});
       navigate('/');
-    } catch (err: any) {
-      setError(
-        err.response?.data?.error ||
-        err.response?.data?.detail ||
-        'Invalid email or password. Please try again.'
-      );
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Invalid email or password. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -76,19 +73,8 @@ export const LoginPage: React.FC = () => {
       setAuth(response.user, response.tokens.access, response.tokens.refresh);
       refreshWorkspaces().catch(() => {});
       navigate('/');
-    } catch (err: any) {
-      let errMsg = 'Failed to create account. Please try again.';
-      if (err.response?.data) {
-        const data = err.response.data;
-        if (typeof data === 'object') {
-          errMsg = Object.entries(data)
-            .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(' ') : val}`)
-            .join(' | ');
-        } else {
-          errMsg = data;
-        }
-      }
-      setError(errMsg);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to create account. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -326,8 +312,8 @@ export const LoginPage: React.FC = () => {
                       setAuth(response.user, response.tokens.access, response.tokens.refresh);
                       refreshWorkspaces().catch(() => {});
                       navigate('/');
-                    } catch (err: any) {
-                      setError(err.response?.data?.error || 'Google login failed');
+                    } catch (err) {
+                      setError(apiErrorMessage(err, 'Google login failed'));
                     } finally {
                       setLoading(false);
                     }

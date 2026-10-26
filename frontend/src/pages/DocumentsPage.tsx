@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { apiErrorMessage, apiErrorStatus } from '../api/client';
 import { useAuthStore, useActiveRole } from '../store/authStore';
 import { useDocuments } from '../hooks/useDocuments';
 import { aiApi, IngestedFile } from '../api/ai';
@@ -46,8 +47,8 @@ export const DocumentsPage: React.FC = () => {
     setDeleteError(null);
     try {
       await deleteFile(file.id);
-    } catch (err: any) {
-      setDeleteError(err.response?.data?.error || 'Delete failed');
+    } catch (err) {
+      setDeleteError(apiErrorMessage(err, 'Delete failed'));
     } finally {
       setDeletingId(null);
     }
@@ -92,13 +93,14 @@ export const DocumentsPage: React.FC = () => {
       setUploadStatus('success');
       clearInputs();
       refetch();
-    } catch (err: any) {
+    } catch (err) {
       setUploadStatus('error');
-      const code = err.response?.status;
-      let text = err.response?.data?.error || 'An unexpected error occurred.';
+      const code = apiErrorStatus(err);
+      let text = apiErrorMessage(err, 'An unexpected error occurred.');
       if (code === 409) text = 'This file has already been ingested. Delete it first to re-ingest.';
       else if (code === 415) text = 'Unsupported file type.';
-      else if (code === 502) text = 'Failed to reach S3 or Bedrock. Verify your credentials.';
+      // 502 is returned when the server cannot write the file to object storage.
+      else if (code === 502) text = 'The server could not store the file. Check its S3 configuration.';
       else if (code === 503) text = 'Ingestion queue is full. Please try again shortly.';
       setErrorMsg(text);
     } finally {

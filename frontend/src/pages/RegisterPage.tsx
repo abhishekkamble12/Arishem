@@ -5,6 +5,7 @@ import { authApi } from '../api/auth';
 import { Mail, Lock, UserPlus, Database, AlertCircle, User as UserIcon } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { FEATURES } from '../config';
+import { apiErrorMessage } from '../api/client';
 
 
 export const RegisterPage: React.FC = () => {
@@ -45,20 +46,8 @@ export const RegisterPage: React.FC = () => {
       // Refresh workspaces from server (non-blocking, errors ignored)
       refreshWorkspaces().catch(() => { });
       navigate('/');
-    } catch (err: any) {
-      let errMsg = 'Failed to create account. Please try again.';
-      if (err.response?.data) {
-        const data = err.response.data;
-        if (typeof data === 'object') {
-          // Join validation errors nicely
-          errMsg = Object.entries(data)
-            .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(' ') : val}`)
-            .join(' | ');
-        } else {
-          errMsg = data;
-        }
-      }
-      setError(errMsg);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to create account. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -224,8 +213,8 @@ export const RegisterPage: React.FC = () => {
                       // Refresh workspaces from server (non-blocking, errors ignored)
                       refreshWorkspaces().catch(() => { });
                       navigate('/');
-                    } catch (err: any) {
-                      setError(err.response?.data?.error || 'Google login failed');
+                    } catch (err) {
+                      setError(apiErrorMessage(err, 'Google login failed'));
                     } finally {
                       setLoading(false);
                     }

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import type { ReasoningStep } from '../api/ai';
 import { aiApi, IngestedFile, QueryResponse, normaliseQueryResponse } from '../api/ai';
 import { useAuthStore } from './authStore';
+import { apiErrorMessage } from '../api/client';
 
 export interface ChatMessage {
   id: string;
@@ -13,7 +15,7 @@ export interface ChatMessage {
   confidence?: number;
   llm_confidence?: number;
   // Agentic fields
-  reasoning_steps?: any[];
+  reasoning_steps?: ReasoningStep[];
   critique_verdict?: string;
   agentic_mode?: boolean;
   timestamp: string;
@@ -106,8 +108,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           critique_verdict: response.critique_verdict,
           agentic_mode: response.agentic_mode,
         });
-      } catch (err: any) {
-        const errMsg = err.response?.data?.error || err.message || 'Failed to query the AI agent';
+      } catch (err) {
+        const errMsg = apiErrorMessage(err, 'Failed to query the AI agent');
         set({ error: errMsg });
 
         get().addMessage({
@@ -130,8 +132,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       try {
         const response = await aiApi.listFiles(workspaceId);
         set({ files: response.files, error: null });
-      } catch (err: any) {
-        const errMsg = err.response?.data?.error || err.message || 'Failed to retrieve ingested files';
+      } catch (err) {
+        const errMsg = apiErrorMessage(err, 'Failed to retrieve ingested files');
         set({ error: errMsg });
       } finally {
         set({ isFetchingFiles: false });

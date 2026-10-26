@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiErrorMessage } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { aiApi, IngestedFile } from '../api/ai';
 import { 
@@ -50,6 +51,10 @@ export const MeetingsPage: React.FC = () => {
     if (activeWorkspaceId) {
       fetchMeetingFiles();
     }
+    // Refetch only when the workspace changes. fetchMeetingFiles reads
+    // selectedFileId just to pick a default; depending on it would refetch the
+    // list every time a different meeting is selected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId]);
 
   const fetchMeetingFiles = async () => {
@@ -61,7 +66,7 @@ export const MeetingsPage: React.FC = () => {
       if (res.files && res.files.length > 0 && !selectedFileId) {
         handleSelectFile(res.files[0].id);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to fetch files:', err);
     } finally {
       setIsLoadingFiles(false);
@@ -76,7 +81,7 @@ export const MeetingsPage: React.FC = () => {
     try {
       const data = await aiApi.getMeetingAnalysis(fileId);
       setAnalysis(data);
-    } catch (err: any) {
+    } catch {
       console.log('No analysis found yet for this file or still processing.');
     } finally {
       setIsLoadingAnalysis(false);
@@ -99,8 +104,8 @@ export const MeetingsPage: React.FC = () => {
       if (res.file_id) {
         handleSelectFile(res.file_id);
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to process YouTube URL');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to process YouTube URL'));
     } finally {
       setIsIngesting(false);
     }
@@ -118,7 +123,7 @@ export const MeetingsPage: React.FC = () => {
     try {
       const res = await aiApi.query(userMessage, activeWorkspaceId);
       setChatHistory(prev => [...prev, { role: 'assistant', content: res.answer }]);
-    } catch (err: any) {
+    } catch {
       setChatHistory(prev => [
         ...prev, 
         { role: 'assistant', content: 'Sorry, I ran into an error while processing your query.' }

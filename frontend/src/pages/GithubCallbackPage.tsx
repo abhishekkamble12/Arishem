@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authApi } from '../api/auth';
 import { useAuthStore } from '../store/authStore';
 import { Database, AlertCircle } from 'lucide-react';
+import { apiErrorMessage } from '../api/client';
 
 export const GithubCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -24,13 +25,13 @@ export const GithubCallbackPage: React.FC = () => {
         // Refresh workspaces from server (non-blocking, errors ignored)
         refreshWorkspaces().catch(() => { });
         navigate('/');
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'GitHub login failed');
+      } catch (err) {
+        setError(apiErrorMessage(err, 'GitHub login failed'));
       }
     };
 
     authenticate();
-  }, [searchParams, navigate, setAuth]);
+  }, [searchParams, navigate, setAuth, refreshWorkspaces]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-dark-950 px-4 relative overflow-hidden">

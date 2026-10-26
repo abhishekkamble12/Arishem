@@ -26,7 +26,7 @@ export interface TaskStatusResponse {
   task_id: string;
   status: string;
   error?: string;
-  result?: any;
+  result?: unknown;
 }
 
 export interface ListFilesResponse {

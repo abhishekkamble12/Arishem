@@ -141,3 +141,32 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+/**
+ * A readable message for a failed request, without reaching into an untyped
+ * error. Understands this API's { error } / { message } bodies, DRF's { detail }
+ * and its field-validation shape { field: ["message", ...] }, and network
+ * failures that have no response at all.
+ */
+export const apiErrorMessage = (err: unknown, fallback: string): string => {
+  if (!axios.isAxiosError(err)) {
+    return err instanceof Error && err.message ? err.message : fallback;
+  }
+  const data: unknown = err.response?.data;
+  if (typeof data === 'string' && data.trim()) return data;
+  if (data && typeof data === 'object') {
+    const body = data as Record<string, unknown>;
+    for (const key of ['error', 'detail', 'message']) {
+      if (typeof body[key] === 'string' && body[key]) return body[key] as string;
+    }
+    const fields = Object.entries(body)
+      .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(' ') : String(val)}`)
+      .join(' | ');
+    if (fields) return fields;
+  }
+  return err.message || fallback;
+};
+
+/** The HTTP status of a failed request, if it got a response. */
+export const apiErrorStatus = (err: unknown): number | undefined =>
+  axios.isAxiosError(err) ? err.response?.status : undefined;

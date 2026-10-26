@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { aiApi, IngestedFile } from '../api/ai';
 import { useAuthStore } from '../store/authStore';
+import { apiErrorMessage } from '../api/client';
 
 export interface UseDocumentsResult {
   files: IngestedFile[];
@@ -43,9 +44,9 @@ export function useDocuments(pollIntervalMs: number = 2500): UseDocumentsResult 
         setFiles(resp.files || []);
         setError(null);
       }
-    } catch (err: any) {
+    } catch (err) {
       if (isMountedRef.current) {
-        const msg = err.response?.data?.error || err.message || 'Failed to load documents';
+        const msg = apiErrorMessage(err, 'Failed to load documents');
         if (!isBackground) setError(msg);
       }
     } finally {
