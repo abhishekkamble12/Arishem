@@ -23,6 +23,7 @@ from typing import Any
 from decouple import config
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
 
 from .Ai_service.embedding import get_vector_store
@@ -34,26 +35,49 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 TOP_K                = int(config("RAG_TOP_K", default=5))
 CONFIDENCE_THRESHOLD = float(config("RAG_CONFIDENCE_THRESHOLD", default=0.35))
-GROQ_MODEL           = config("GROQ_MODEL_ID", default="llama-3.3-70b-versatile")
+# Groq retires models on a few months' notice; GET /openai/v1/models lists what is
+# live. Both defaults below were checked against that list.
+GROQ_MODEL           = config("GROQ_MODEL_ID", default="openai/gpt-oss-20b")
+GROQ_FALLBACK_MODEL  = config("GROQ_FALLBACK_MODEL_ID", default="openai/gpt-oss-120b")
+LLM_TIMEOUT_SECONDS  = float(config("LLM_TIMEOUT_SECONDS", default=30))
+LLM_MAX_RETRIES      = int(config("LLM_MAX_RETRIES", default=2))
 AGENTIC_MODE         = config("RAG_AGENTIC_MODE", default="true").lower() == "true"
 SELF_CRITIQUE        = config("SELF_CRITIQUE_ENABLED", default="true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Singleton LLM
 # ---------------------------------------------------------------------------
-_llm: ChatGroq | None = None
+_llm: Runnable | None = None
 
 
-def _get_llm() -> ChatGroq:
+def _build_llm(model: str) -> ChatGroq:
+    return ChatGroq(
+        model=model,
+        temperature=0.2,
+        max_tokens=2048,
+        # Without a timeout a hung Groq connection holds a gunicorn worker open
+        # until the client gives up; max_retries covers 429s and 5xx.
+        timeout=LLM_TIMEOUT_SECONDS,
+        max_retries=LLM_MAX_RETRIES,
+        model_kwargs={"response_format": {"type": "json_object"}},
+    )
+
+
+def _get_llm() -> Runnable:
+    """
+    The primary model, backed by a second one. Retries inside the client cover
+    transient errors; the fallback covers a model being retired, overloaded or
+    rejecting the request outright, which a retry would never fix.
+    """
     global _llm
     if _llm is None:
-        _llm = ChatGroq(
-            model=GROQ_MODEL,
-            temperature=0.2,
-            max_tokens=2048,
-            model_kwargs={"response_format": {"type": "json_object"}},
-        )
-        logger.info("ChatGroq initialised (model: %s) with JSON mode", GROQ_MODEL)
+        primary = _build_llm(GROQ_MODEL)
+        if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
+            _llm = primary.with_fallbacks([_build_llm(GROQ_FALLBACK_MODEL)])
+            logger.info("ChatGroq ready (model: %s, fallback: %s)", GROQ_MODEL, GROQ_FALLBACK_MODEL)
+        else:
+            _llm = primary
+            logger.info("ChatGroq ready (model: %s, no fallback)", GROQ_MODEL)
     return _llm
 
 
