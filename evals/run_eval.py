@@ -44,6 +44,18 @@ TOP_K = agent_mod.TOP_K
 # Mirrors Services/Extractor.py — kept local because importing it requires Django
 CHUNK_SIZE, CHUNK_OVERLAP = 800, 150
 JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "openai/gpt-oss-120b")
+# Generation is expensive and scoring is rate-limited, so the two are
+# decoupled: answers are cached, and EVAL_REUSE_ANSWERS=1 scores the cache
+# without spending generation tokens again.
+ANSWERS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "answers_cache.json")
+REUSE_ANSWERS = os.getenv("EVAL_REUSE_ANSWERS", "").lower() in ("1", "true", "yes")
+# Four metrics over 30 questions is ~120 judge calls, which exhausts a free
+# Groq daily token budget. On a corpus small enough that every query retrieves
+# everything, the context metrics cannot discriminate anyway, so EVAL_METRICS
+# lets the budget go to the two that can.
+EVAL_METRICS = [m.strip() for m in os.getenv(
+    "EVAL_METRICS", "faithfulness,answer_relevancy,context_precision,context_recall"
+).split(",") if m.strip()]
 
 agent_mod.CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -276,6 +288,18 @@ async def main():
         context_recall,
         faithfulness,
     )
+
+    _metrics = {
+        "faithfulness": faithfulness,
+        "answer_relevancy": answer_relevancy,
+        "context_precision": context_precision,
+        "context_recall": context_recall,
+    }
+    unknown = [m for m in EVAL_METRICS if m not in _metrics]
+    if unknown:
+        raise SystemExit(f"Unknown EVAL_METRICS {unknown}; choose from {sorted(_metrics)}")
+    chosen_metrics = [_metrics[m] for m in EVAL_METRICS]
+    print(f"Metrics: {', '.join(EVAL_METRICS)}")
     try:
         from ragas.embeddings import LangchainEmbeddingsWrapper
         from ragas.llms import LangchainLLMWrapper
@@ -295,49 +319,62 @@ async def main():
         ragas_llm = eval_llm
         ragas_embeddings = embedding_mod.get_embeddings()
 
-    print("Running queries through the agent pipeline...")
-    per_question = []
-    for item in golden_set:
-        question = item["question"]
-        gt = item["ground_truth"]
+    if REUSE_ANSWERS:
+        if not os.path.exists(ANSWERS_CACHE):
+            raise SystemExit(f"EVAL_REUSE_ANSWERS is set but {ANSWERS_CACHE} is missing.")
+        with open(ANSWERS_CACHE, encoding="utf-8") as fh:
+            cached = json.load(fh)
+        per_question = cached["questions"]
+        data_samples = cached["data_samples"]
+        print(f"Reusing {len(per_question)} cached answers; no generation calls.")
+    else:
+        print("Running queries through the agent pipeline...")
+        per_question = []
+        for item in golden_set:
+            question = item["question"]
+            gt = item["ground_truth"]
 
-        try:
-            # Query the agent
-            started = time.perf_counter()
-            res = agent_mod.query(question=question, workspace_id=1, top_k=TOP_K)
-            latency_ms = int((time.perf_counter() - started) * 1000)
-            answer = res.get("answer", "")
+            try:
+                started = time.perf_counter()
+                res = agent_mod.query(question=question, workspace_id=1, top_k=TOP_K)
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                answer = res.get("answer", "")
 
-            # Retrieve exact chunks for context
-            vs = mock_get_vector_store()
-            from qdrant_client.http import models as qdrant_models
-            filter_ = qdrant_models.Filter(must=[
-                qdrant_models.FieldCondition(key="metadata.workspace_id", match=qdrant_models.MatchValue(value=1))
-            ])
-            docs_res = vs.similarity_search(question, k=TOP_K, filter=filter_)
-            contexts = [d.page_content for d in docs_res]
+                # The exact chunks the judge will score the answer against.
+                vs = mock_get_vector_store()
+                from qdrant_client.http import models as qdrant_models
+                filter_ = qdrant_models.Filter(must=[
+                    qdrant_models.FieldCondition(key="metadata.workspace_id", match=qdrant_models.MatchValue(value=1))
+                ])
+                docs_res = vs.similarity_search(question, k=TOP_K, filter=filter_)
+                contexts = [d.page_content for d in docs_res]
 
-            data_samples["question"].append(question)
-            data_samples["answer"].append(answer)
-            data_samples["contexts"].append(contexts)
-            data_samples["ground_truth"].append(gt)
-            data_samples["reference"].append(gt)  # add both for compatibility
-            per_question.append({
-                "question": question,
-                "ground_truth": gt,
-                "answerable": is_answerable(item),
-                "answer": answer,
-                "confidence": res.get("confidence"),
-                "refused": not res.get("sources"),
-                "latency_ms": latency_ms,
-            })
+                data_samples["question"].append(question)
+                data_samples["answer"].append(answer)
+                data_samples["contexts"].append(contexts)
+                data_samples["ground_truth"].append(gt)
+                data_samples["reference"].append(gt)  # ragas 0.1.x vs 0.2.x
+                per_question.append({
+                    "question": question,
+                    "ground_truth": gt,
+                    "answerable": is_answerable(item),
+                    "answer": answer,
+                    "confidence": res.get("confidence"),
+                    "refused": bool(res.get("refused", not res.get("sources"))),
+                    "latency_ms": latency_ms,
+                    "usage": res.get("usage"),
+                })
 
-        except Exception as e:
-            print(f"Error querying '{question}': {e}")
-            continue
+            except Exception as e:
+                print(f"Error querying '{question}': {e}")
+                continue
 
-        # Sleep to avoid hitting Groq rate limits
-        time.sleep(2)
+            time.sleep(2)  # stay under Groq's per-minute limits
+
+        with open(ANSWERS_CACHE, "w", encoding="utf-8") as fh:
+            json.dump({"data_samples": data_samples, "questions": per_question},
+                      fh, indent=2, default=str)
+        print(f"Cached answers to {ANSWERS_CACHE} — rescore with EVAL_REUSE_ANSWERS=1.")
 
     from datasets import Dataset
     dataset = Dataset.from_dict(data_samples)
@@ -352,7 +389,7 @@ async def main():
 
         results = evaluate(
             dataset,
-            metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+            metrics=chosen_metrics,
             llm=ragas_llm,
             embeddings=ragas_embeddings,
             raise_exceptions=False,

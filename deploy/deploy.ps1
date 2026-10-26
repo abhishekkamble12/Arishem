@@ -52,16 +52,26 @@ $env:AWS_DEFAULT_REGION = $Region
 
 # A production SECRET_KEY distinct from the development one. Generated once and
 # then reused, so existing sessions survive a redeploy.
-$existing = aws ssm get-parameter --name /arishem/secret_key --with-decryption `
-    --query Parameter.Value --output text 2>$null
-if ($LASTEXITCODE -eq 0 -and $existing) {
+#
+# describe-parameters rather than get-parameter: a missing parameter makes
+# get-parameter write to stderr, and Windows PowerShell turns a native command's
+# stderr into a terminating error under ErrorActionPreference='Stop'. This call
+# succeeds with empty output whether or not the parameter exists.
+$found = aws ssm describe-parameters `
+    --parameter-filters 'Key=Name,Option=Equals,Values=/arishem/secret_key' `
+    --query 'Parameters[].Name' --output text
+if ($found) {
     Write-Host 'Reusing the existing production SECRET_KEY.'
-    $secretKey = $existing
+    $secretKey = aws ssm get-parameter --name /arishem/secret_key --with-decryption `
+        --query Parameter.Value --output text
 }
 else {
     Write-Host 'Generating a new production SECRET_KEY.'
-    $bytes = [byte[]]::new(48)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $bytes = New-Object byte[] 48
+    # Create().GetBytes() exists on both .NET Framework (Windows PowerShell 5.1)
+    # and .NET Core; RandomNumberGenerator::Fill is Core-only and throws here.
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     $secretKey = [Convert]::ToBase64String($bytes).TrimEnd('=')
 }
 
