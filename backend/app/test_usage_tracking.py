@@ -41,6 +41,17 @@ class UsageCollectorTests(TestCase):
         c.on_llm_end(_llm_result(12, 3, via_message=True))
         self.assertEqual(c.as_dict(), {"llm_calls": 1, "prompt_tokens": 12, "completion_tokens": 3})
 
+    def test_the_model_behind_each_call_is_recorded(self):
+        """The fallback can substitute a second model; a report must be able to tell."""
+        c = UsageCollector()
+        primary = _llm_result(10, 2)
+        primary.llm_output["model_name"] = "openai/gpt-oss-20b"
+        fallback = _llm_result(10, 2)
+        fallback.llm_output["model_name"] = "openai/gpt-oss-120b"
+        c.on_llm_end(primary)
+        c.on_llm_end(fallback)
+        self.assertEqual(c.models, {"openai/gpt-oss-20b", "openai/gpt-oss-120b"})
+
     def test_a_response_with_no_usage_still_counts_the_call(self):
         c = UsageCollector()
         c.on_llm_end(SimpleNamespace(llm_output=None, generations=[]))

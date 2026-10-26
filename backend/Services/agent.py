@@ -84,9 +84,15 @@ class UsageCollector(BaseCallbackHandler):
         self.llm_calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.models: set[str] = set()
 
     def on_llm_end(self, response, **kwargs) -> None:
         self.llm_calls += 1
+        # Which model answered, since the fallback can substitute a second one. Without
+        # this, "the generator" in a report could silently mean two different models.
+        model = (response.llm_output or {}).get("model_name")
+        if model:
+            self.models.add(model)
         usage = (response.llm_output or {}).get("token_usage") or {}
         if not usage:
             # Fallback for providers that only populate the message's metadata.
@@ -451,6 +457,6 @@ def query(
 
     # Zeros here are meaningful: a refused question costs no tokens, which is the
     # point of refusing before generation.
-    result["usage"] = collector.as_dict()
+    result["usage"] = {**collector.as_dict(), "models": sorted(collector.models)}
     result.setdefault("refused", False)
     return result
