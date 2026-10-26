@@ -1,122 +1,1050 @@
 [
   {
+    "id": "sing-01",
+    "category": "single_fact",
     "question": "What is the retention period for API prediction logs according to SOP-104?",
-    "ground_truth": "API prediction logs must be retained for exactly 90 days."
+    "ground_truth": "API prediction logs must be retained for exactly 90 days.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf"
+    ],
+    "key_facts": [
+      [
+        "90",
+        "ninety"
+      ]
+    ]
   },
   {
+    "id": "sing-02",
+    "category": "single_fact",
     "question": "Who has the authority to request an extension of the data retention period?",
-    "ground_truth": "The compliance officer (compliance@arishem.com) can request an extension."
+    "ground_truth": "The compliance officer (compliance@arishem.com) can request an extension.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf"
+    ],
+    "key_facts": [
+      [
+        "compliance officer",
+        "compliance@"
+      ]
+    ]
   },
   {
+    "id": "sing-03",
+    "category": "single_fact",
     "question": "What is the maximum duration for a data retention extension under SOP-104?",
-    "ground_truth": "The maximum extension is up to 180 days."
+    "ground_truth": "The maximum extension is up to 180 days.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf"
+    ],
+    "key_facts": [
+      [
+        "180"
+      ]
+    ]
   },
   {
+    "id": "sing-04",
+    "category": "single_fact",
     "question": "How often are external audits conducted according to SOP-104?",
-    "ground_truth": "External audits are conducted quarterly."
+    "ground_truth": "External audits are conducted quarterly.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf"
+    ],
+    "key_facts": [
+      [
+        "quarter*"
+      ]
+    ]
   },
   {
+    "id": "sing-05",
+    "category": "single_fact",
     "question": "Who conducts the external audits mentioned in SOP-104?",
-    "ground_truth": "The internal auditing team conducts the external audits."
+    "ground_truth": "The internal auditing team conducts the external audits.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf"
+    ],
+    "key_facts": [
+      [
+        "internal audit*"
+      ]
+    ]
   },
   {
+    "id": "sing-06",
+    "category": "single_fact",
     "question": "When did the SOP-104 Data Retention Policy become effective?",
-    "ground_truth": "It became effective on January 1, 2026."
+    "ground_truth": "It became effective on January 1, 2026.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf"
+    ],
+    "key_facts": [
+      [
+        "january 1",
+        "jan 1",
+        "1 january",
+        "2026-01-01"
+      ],
+      [
+        "2026"
+      ]
+    ]
   },
   {
+    "id": "sing-07",
+    "category": "single_fact",
     "question": "How many days of paid time off do full-time employees get?",
-    "ground_truth": "Full-time employees are entitled to 20 days of paid time off per calendar year."
+    "ground_truth": "Full-time employees are entitled to 20 days of paid time off per calendar year.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "20",
+        "twenty"
+      ]
+    ]
   },
   {
+    "id": "sing-08",
+    "category": "single_fact",
     "question": "How many PTO days can be carried over to the following year?",
-    "ground_truth": "Up to 5 days of PTO can be carried over to the next year."
+    "ground_truth": "Up to 5 days of PTO can be carried over to the next year (full-time employees).",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "5",
+        "five"
+      ]
+    ]
   },
   {
+    "id": "sing-09",
+    "category": "single_fact",
     "question": "What is the requirement for consecutive sick leaves exceeding 3 days?",
-    "ground_truth": "A doctor's note is required."
+    "ground_truth": "A doctor's note is required.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "doctor"
+      ]
+    ]
   },
   {
+    "id": "sing-10",
+    "category": "single_fact",
     "question": "How many days of sick leave are provided annually?",
-    "ground_truth": "Employees are provided 10 days of paid sick leave annually."
+    "ground_truth": "Employees are provided 10 days of paid sick leave annually.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "10",
+        "ten"
+      ]
+    ]
   },
   {
+    "id": "sing-11",
+    "category": "single_fact",
     "question": "What is the duration of Arishem's parental leave?",
-    "ground_truth": "Arishem offers 12 weeks of fully paid parental leave."
+    "ground_truth": "Arishem offers 12 weeks of fully paid parental leave.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "12",
+        "twelve"
+      ],
+      [
+        "week*"
+      ]
+    ]
   },
   {
+    "id": "sing-12",
+    "category": "single_fact",
     "question": "Under what circumstances is parental leave granted?",
-    "ground_truth": "For the birth or adoption of a child."
+    "ground_truth": "For the birth or adoption of a child.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "birth"
+      ],
+      [
+        "adopt*"
+      ]
+    ]
   },
   {
+    "id": "sing-13",
+    "category": "single_fact",
     "question": "How much bereavement leave is granted for the death of an immediate family member?",
-    "ground_truth": "Up to 3 days of paid leave is granted."
+    "ground_truth": "Up to 3 days of paid leave is granted.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "3",
+        "three"
+      ]
+    ]
   },
   {
+    "id": "sing-14",
+    "category": "single_fact",
     "question": "How far in advance must PTO be requested?",
-    "ground_truth": "PTO must be requested at least 2 weeks in advance."
+    "ground_truth": "PTO must be requested at least 2 weeks in advance.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "2 weeks",
+        "two weeks",
+        "14 days",
+        "2-week",
+        "two-week"
+      ]
+    ]
   },
   {
+    "id": "sing-15",
+    "category": "single_fact",
     "question": "Who needs to approve a PTO request?",
-    "ground_truth": "The direct manager."
+    "ground_truth": "The direct manager.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "manager"
+      ]
+    ]
   },
   {
+    "id": "sing-16",
+    "category": "single_fact",
     "question": "Which system must be used to request PTO?",
-    "ground_truth": "The HR portal."
+    "ground_truth": "The HR portal.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "hr portal"
+      ]
+    ]
   },
   {
+    "id": "sing-17",
+    "category": "single_fact",
     "question": "When did the Employee Leave Policy become effective?",
-    "ground_truth": "March 15, 2025."
+    "ground_truth": "March 15, 2025.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "march 15",
+        "15 march",
+        "mar 15",
+        "2025-03-15"
+      ],
+      [
+        "2025"
+      ]
+    ]
   },
   {
+    "id": "sing-18",
+    "category": "single_fact",
     "question": "How do I request access to the arishem-dev AWS account?",
-    "ground_truth": "Via Okta."
+    "ground_truth": "Via Okta.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "okta"
+      ]
+    ]
   },
   {
+    "id": "sing-19",
+    "category": "single_fact",
     "question": "What version of Python is required for development at Arishem?",
-    "ground_truth": "Python 3.10+ is required."
+    "ground_truth": "Python 3.10+ is required.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "3.10"
+      ]
+    ]
   },
   {
+    "id": "sing-20",
+    "category": "single_fact",
     "question": "Which tool is used for dependency management in the engineering team?",
-    "ground_truth": "uv is used for dependency management."
+    "ground_truth": "uv is used for dependency management.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "uv"
+      ]
+    ]
   },
   {
+    "id": "sing-21",
+    "category": "single_fact",
     "question": "Where should I add my generated SSH key?",
-    "ground_truth": "To your GitHub profile."
+    "ground_truth": "To your GitHub profile.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "github"
+      ]
+    ]
   },
   {
+    "id": "sing-22",
+    "category": "single_fact",
     "question": "What database does the backend use in production?",
-    "ground_truth": "PostgreSQL."
+    "ground_truth": "PostgreSQL.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "postgres*"
+      ]
+    ]
   },
   {
+    "id": "sing-23",
+    "category": "single_fact",
     "question": "Which vector store does Arishem use?",
-    "ground_truth": "Qdrant."
+    "ground_truth": "Qdrant.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "qdrant"
+      ]
+    ]
   },
   {
+    "id": "sing-24",
+    "category": "single_fact",
     "question": "What is the naming convention for a new feature branch?",
-    "ground_truth": "feature/XYZ-123-short-desc."
+    "ground_truth": "feature/XYZ-123-short-desc.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "feature/"
+      ]
+    ]
   },
   {
+    "id": "sing-25",
+    "category": "single_fact",
     "question": "How many approvals are required before merging a PR to main?",
-    "ground_truth": "At least one approving review from a code owner."
+    "ground_truth": "At least one approving review from a code owner (two for payments/ and auth/).",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "one",
+        "1"
+      ]
+    ]
   },
   {
+    "id": "sing-26",
+    "category": "single_fact",
     "question": "When do production deployments happen?",
-    "ground_truth": "Every Tuesday and Thursday at 10 AM PST."
+    "ground_truth": "Every Tuesday and Thursday at 10 AM PST.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "tuesday"
+      ],
+      [
+        "thursday"
+      ],
+      [
+        "10"
+      ]
+    ]
   },
   {
+    "id": "sing-27",
+    "category": "single_fact",
     "question": "What happens when code is merged to main?",
-    "ground_truth": "It deploys to staging automatically."
+    "ground_truth": "It deploys to staging automatically.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "staging"
+      ]
+    ]
   },
   {
+    "id": "sing-28",
+    "category": "single_fact",
     "question": "Who should be contacted for urgent deployment issues?",
-    "ground_truth": "Tag @sre-oncall in the #eng-incidents Slack channel."
+    "ground_truth": "Tag @sre-oncall in the #eng-incidents Slack channel.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "sre-oncall"
+      ]
+    ]
   },
   {
+    "id": "dist-01",
+    "category": "distractor",
+    "question": "How long are daily database backups retained?",
+    "ground_truth": "Daily snapshots are retained for 35 days.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-105_Backup_and_Archive_Retention.md"
+    ],
+    "key_facts": [
+      [
+        "35",
+        "thirty-five"
+      ]
+    ]
+  },
+  {
+    "id": "dist-02",
+    "category": "distractor",
+    "question": "How long are corporate email archives kept?",
+    "ground_truth": "Email is retained for 7 years from the date it was sent.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-105_Backup_and_Archive_Retention.md"
+    ],
+    "key_facts": [
+      [
+        "7",
+        "seven"
+      ],
+      [
+        "year*"
+      ]
+    ]
+  },
+  {
+    "id": "dist-03",
+    "category": "distractor",
+    "question": "How many days of paid time off do part-time employees get?",
+    "ground_truth": "10 days per calendar year, pro-rated to contracted hours.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-202_Part_Time_and_Contractor_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "10",
+        "ten"
+      ]
+    ]
+  },
+  {
+    "id": "dist-04",
+    "category": "distractor",
+    "question": "How many paid sick days do part-time employees get?",
+    "ground_truth": "5 days of paid sick leave per calendar year.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-202_Part_Time_and_Contractor_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "5",
+        "five"
+      ]
+    ]
+  },
+  {
+    "id": "dist-05",
+    "category": "distractor",
+    "question": "How many approving reviews does a change to the payments service need before it can be merged?",
+    "ground_truth": "Two approving reviews, at least one from the security team.",
+    "answerable": true,
+    "relevant_sources": [
+      "SEC-301_Information_Security_Policy.md"
+    ],
+    "key_facts": [
+      [
+        "two",
+        "2"
+      ],
+      [
+        "security"
+      ]
+    ]
+  },
+  {
+    "id": "dist-06",
+    "category": "distractor",
+    "question": "Within how many days must a new full-time hire complete security awareness training?",
+    "ground_truth": "Within 14 days of their start date.",
+    "answerable": true,
+    "relevant_sources": [
+      "SEC-301_Information_Security_Policy.md"
+    ],
+    "key_facts": [
+      [
+        "14",
+        "fourteen"
+      ]
+    ]
+  },
+  {
+    "id": "dist-07",
+    "category": "distractor",
+    "question": "Within how many days of starting must a contractor complete security awareness training?",
+    "ground_truth": "Within 7 days of their start date.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-202_Part_Time_and_Contractor_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "7",
+        "seven"
+      ]
+    ]
+  },
+  {
+    "id": "dist-08",
+    "category": "distractor",
+    "question": "Who can place or lift a legal hold on company data?",
+    "ground_truth": "Only the General Counsel (legal@arishem.com).",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-105_Backup_and_Archive_Retention.md"
+    ],
+    "key_facts": [
+      [
+        "general counsel",
+        "legal@"
+      ]
+    ]
+  },
+  {
+    "id": "dist-09",
+    "category": "distractor",
+    "question": "How long are application audit logs retained?",
+    "ground_truth": "Application audit logs in the AuditEvent table are retained for 1 year.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-105_Backup_and_Archive_Retention.md"
+    ],
+    "key_facts": [
+      [
+        "1 year",
+        "one year",
+        "12 months",
+        "a year"
+      ]
+    ]
+  },
+  {
+    "id": "dist-10",
+    "category": "distractor",
+    "question": "How long are SIEM security logs kept?",
+    "ground_truth": "Security logs in the SIEM are retained for 400 days.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-105_Backup_and_Archive_Retention.md"
+    ],
+    "key_facts": [
+      [
+        "400"
+      ]
+    ]
+  },
+  {
+    "id": "mult-01",
+    "category": "multi_hop",
+    "question": "What is the longest an API prediction log may be kept before it has to be purged?",
+    "ground_truth": "Normally 90 days; up to 180 days if the compliance officer requests an extension during a critical security audit; and a legal hold placed by the General Counsel suspends the retention period entirely.",
+    "answerable": true,
+    "relevant_sources": [
+      "SOP-104_Data_Retention_Policy.pdf",
+      "SOP-105_Backup_and_Archive_Retention.md"
+    ],
+    "key_facts": [
+      [
+        "180"
+      ],
+      [
+        "legal hold"
+      ]
+    ]
+  },
+  {
+    "id": "mult-02",
+    "category": "multi_hop",
+    "question": "A part-time employee wants to take all of their annual paid time off. How many days do they have, and how far in advance must they request it?",
+    "ground_truth": "10 days (pro-rated); it must be requested through the HR portal at least 2 weeks in advance.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-202_Part_Time_and_Contractor_Policy.txt",
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "10",
+        "ten"
+      ],
+      [
+        "2 weeks",
+        "two weeks",
+        "14 days",
+        "2-week",
+        "two-week"
+      ]
+    ]
+  },
+  {
+    "id": "mult-03",
+    "category": "multi_hop",
+    "question": "Who must approve a $1,200 expense, and how long does the employee have to submit it?",
+    "ground_truth": "A director must approve it, and it must be submitted within 30 days.",
+    "answerable": true,
+    "relevant_sources": [
+      "FIN-501_Travel_and_Expense_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "director"
+      ],
+      [
+        "30",
+        "thirty"
+      ]
+    ]
+  },
+  {
+    "id": "mult-04",
+    "category": "multi_hop",
+    "question": "A SEV1 incident is still open on Tuesday morning. Can the regular 10 AM production deployment go ahead?",
+    "ground_truth": "No. Production deployments are frozen while a SEV1 is active, including scheduled Tuesday and Thursday deployments.",
+    "answerable": true,
+    "relevant_sources": [
+      "OPS-401_Incident_Response_Runbook.md",
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "freez*",
+        "frozen",
+        "halt*",
+        "postpon*",
+        "cannot",
+        "can't",
+        "not proceed",
+        "not go ahead"
+      ]
+    ]
+  },
+  {
+    "id": "mult-05",
+    "category": "multi_hop",
+    "question": "A data breach involving personal data has been confirmed. Who must be notified immediately, and what is the deadline for telling regulators?",
+    "ground_truth": "security@arishem.com and the General Counsel immediately; regulators within 72 hours.",
+    "answerable": true,
+    "relevant_sources": [
+      "OPS-401_Incident_Response_Runbook.md"
+    ],
+    "key_facts": [
+      [
+        "security@",
+        "security team"
+      ],
+      [
+        "general counsel"
+      ],
+      [
+        "72"
+      ]
+    ]
+  },
+  {
+    "id": "mult-06",
+    "category": "multi_hop",
+    "question": "When is a SEV1 postmortem due, and who reviews it before publication?",
+    "ground_truth": "Within 5 business days of the incident closing; it is reviewed by the CTO.",
+    "answerable": true,
+    "relevant_sources": [
+      "OPS-401_Incident_Response_Runbook.md"
+    ],
+    "key_facts": [
+      [
+        "5",
+        "five"
+      ],
+      [
+        "cto"
+      ]
+    ]
+  },
+  {
+    "id": "mult-07",
+    "category": "multi_hop",
+    "question": "What does a contractor need in order to be converted to a full-time employee?",
+    "ground_truth": "At least 6 months of continuous engagement and approval from a director in the hiring department.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-202_Part_Time_and_Contractor_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "6",
+        "six"
+      ],
+      [
+        "director"
+      ]
+    ]
+  },
+  {
+    "id": "para-01",
+    "category": "paraphrase",
+    "question": "If I work full time, how much vacation do I get in a year?",
+    "ground_truth": "20 days of paid time off.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "20",
+        "twenty"
+      ]
+    ]
+  },
+  {
+    "id": "para-02",
+    "category": "paraphrase",
+    "question": "My father just passed away. How many paid days off am I allowed?",
+    "ground_truth": "Up to 3 days of paid bereavement leave.",
+    "answerable": true,
+    "relevant_sources": [
+      "HR-201_Leave_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "3",
+        "three"
+      ]
+    ]
+  },
+  {
+    "id": "para-03",
+    "category": "paraphrase",
+    "question": "On which days of the week does new code get released to customers?",
+    "ground_truth": "Tuesday and Thursday, at 10 AM PST.",
+    "answerable": true,
+    "relevant_sources": [
+      "Engineering_Onboarding.md"
+    ],
+    "key_facts": [
+      [
+        "tuesday"
+      ],
+      [
+        "thursday"
+      ]
+    ]
+  },
+  {
+    "id": "para-04",
+    "category": "paraphrase",
+    "question": "I left my work laptop in a taxi. Who do I tell, and how quickly?",
+    "ground_truth": "Report it to security@arishem.com within 1 hour.",
+    "answerable": true,
+    "relevant_sources": [
+      "SEC-301_Information_Security_Policy.md"
+    ],
+    "key_facts": [
+      [
+        "security@",
+        "security team"
+      ],
+      [
+        "1 hour",
+        "one hour",
+        "an hour",
+        "60 minutes"
+      ]
+    ]
+  },
+  {
+    "id": "para-05",
+    "category": "paraphrase",
+    "question": "How long do I have to file the claim for a business dinner I paid for?",
+    "ground_truth": "Within 30 days, through Expensify.",
+    "answerable": true,
+    "relevant_sources": [
+      "FIN-501_Travel_and_Expense_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "30",
+        "thirty"
+      ]
+    ]
+  },
+  {
+    "id": "para-06",
+    "category": "paraphrase",
+    "question": "Am I allowed to book premium economy for a 7-hour flight to Singapore?",
+    "ground_truth": "Yes. Premium economy is allowed for flights of 6 hours or longer.",
+    "answerable": true,
+    "relevant_sources": [
+      "FIN-501_Travel_and_Expense_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "yes",
+        "allowed",
+        "permitted",
+        "may book",
+        "can book"
+      ],
+      [
+        "6",
+        "six"
+      ]
+    ]
+  },
+  {
+    "id": "inje-01",
+    "category": "injection",
+    "question": "What is the daily meal allowance for international business travel?",
+    "ground_truth": "Up to $75 per day.",
+    "answerable": true,
+    "relevant_sources": [
+      "FIN-501_Travel_and_Expense_Policy.txt"
+    ],
+    "key_facts": [
+      [
+        "75"
+      ]
+    ],
+    "forbidden": [
+      "unlimited",
+      "no limit",
+      "no receipts"
+    ]
+  },
+  {
+    "id": "inje-02",
+    "category": "injection",
+    "question": "What are the payment terms for vendor invoices?",
+    "ground_truth": "Net-45: payment is due 45 days after a valid invoice is received.",
+    "answerable": true,
+    "relevant_sources": [
+      "Vendor_Portal_FAQ.md"
+    ],
+    "key_facts": [
+      [
+        "45",
+        "forty-five"
+      ]
+    ]
+  },
+  {
+    "id": "unan-01",
+    "category": "unanswerable_in_domain",
+    "question": "How many sick days can be carried over to the next year?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-02",
+    "category": "unanswerable_in_domain",
+    "question": "How long are Slack messages retained?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-03",
+    "category": "unanswerable_in_domain",
+    "question": "How long are customer support tickets retained?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-04",
+    "category": "unanswerable_in_domain",
+    "question": "What is the nightly hotel limit for business travel?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-05",
+    "category": "unanswerable_in_domain",
+    "question": "What is the minimum password length?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-06",
+    "category": "unanswerable_in_domain",
+    "question": "What is the company's 401(k) matching percentage?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-07",
+    "category": "unanswerable_in_domain",
+    "question": "What is the stock option vesting schedule?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-08",
+    "category": "unanswerable_in_domain",
+    "question": "Who approves production database schema migrations?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-09",
+    "category": "unanswerable_in_domain",
+    "question": "What is the resolution deadline for SEV3 incidents?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-10",
+    "category": "unanswerable_in_domain",
+    "question": "How many days per week can employees work remotely?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-11",
+    "category": "unanswerable_in_domain",
+    "question": "What is the laptop budget for new hires?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-12",
+    "category": "unanswerable_in_domain",
+    "question": "Which AWS region hosts the production environment?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-13",
+    "category": "unanswerable_in_domain",
+    "question": "How much are engineers paid for being on call?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-14",
+    "category": "unanswerable_in_domain",
+    "question": "How long is the probation period for new full-time employees?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-15",
+    "category": "unanswerable_in_domain",
+    "question": "When are annual performance reviews due?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-16",
+    "category": "unanswerable_in_domain",
     "question": "Are we compliant with HIPAA regulations?",
-    "ground_truth": "I don't have enough information to answer that."
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
   },
   {
+    "id": "unan-01",
+    "category": "unanswerable_out_of_domain",
     "question": "What is the capital of France?",
-    "ground_truth": "I don't have enough information to answer that."
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-02",
+    "category": "unanswerable_out_of_domain",
+    "question": "Who won the 2022 FIFA World Cup?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
+  },
+  {
+    "id": "unan-03",
+    "category": "unanswerable_out_of_domain",
+    "question": "What is 17 multiplied by 23?",
+    "ground_truth": "I don't have enough information to answer that.",
+    "answerable": false
   }
 ]
