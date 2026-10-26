@@ -215,6 +215,14 @@ class PredictionLog(models.Model):
     error_msg = models.TextField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
 
+    # Agentic mode makes three or four LLM calls per question, so per-query totals
+    # are the only honest basis for a cost figure. Zero on a refused query, which
+    # is the point of refusing before generation.
+    llm_calls = models.PositiveIntegerField(default=0)
+    prompt_tokens = models.PositiveIntegerField(default=0)
+    completion_tokens = models.PositiveIntegerField(default=0)
+    refused = models.BooleanField(default=False)
+
     class Meta:
         ordering = ["-timestamp"]
 

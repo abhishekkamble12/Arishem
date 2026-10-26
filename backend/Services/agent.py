@@ -21,6 +21,7 @@ import logging
 from typing import Any
 
 from decouple import config
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
@@ -63,11 +64,52 @@ def _build_llm(model: str) -> ChatGroq:
     )
 
 
-def _get_llm() -> Runnable:
+class UsageCollector(BaseCallbackHandler):
+    """
+    Counts LLM calls and tokens for one query.
+
+    Agentic mode makes three or four calls per question, so a per-request total is
+    the only number that reflects what a query actually costs. One collector per
+    query, never shared, because a module-level counter would mix tenants together.
+    """
+
+    def __init__(self) -> None:
+        self.llm_calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        self.llm_calls += 1
+        usage = (response.llm_output or {}).get("token_usage") or {}
+        if not usage:
+            # Fallback for providers that only populate the message's metadata.
+            try:
+                meta = response.generations[0][0].message.usage_metadata or {}
+                usage = {
+                    "prompt_tokens": meta.get("input_tokens", 0),
+                    "completion_tokens": meta.get("output_tokens", 0),
+                }
+            except (AttributeError, IndexError, TypeError):
+                usage = {}
+        self.prompt_tokens += usage.get("prompt_tokens") or 0
+        self.completion_tokens += usage.get("completion_tokens") or 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "llm_calls": self.llm_calls,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+        }
+
+
+def _get_llm(collector: UsageCollector | None = None) -> Runnable:
     """
     The primary model, backed by a second one. Retries inside the client cover
     transient errors; the fallback covers a model being retired, overloaded or
     rejecting the request outright, which a retry would never fix.
+
+    With a collector, the returned runnable is a cheap binding around the same
+    cached client that reports usage to it.
     """
     global _llm
     if _llm is None:
@@ -78,7 +120,7 @@ def _get_llm() -> Runnable:
         else:
             _llm = primary
             logger.info("ChatGroq ready (model: %s, no fallback)", GROQ_MODEL)
-    return _llm
+    return _llm.with_config(callbacks=[collector]) if collector else _llm
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +171,10 @@ def _low_confidence_response(n_chunks: int, confidence: float, agentic: bool) ->
         "answer": "I don't have enough relevant context in the uploaded documents to answer your question confidently.",
         "sources": [], "chunks": n_chunks, "confidence": confidence,
         "agentic_mode": agentic,
+        # Reported explicitly rather than inferred from a zero token count: in
+        # agentic mode the decomposition call has already happened by now, so a
+        # refusal is not free, only much cheaper.
+        "refused": True,
     }
 
 
@@ -164,6 +210,7 @@ def _simple_query(
     user_role: str | None,
     qdrant_filter,
     vector_store,
+    collector=None,
 ) -> dict[str, Any]:
     """Original single-pass RAG. Used as primary path (non-agentic) and as fallback."""
     chunks_with_scores = vector_store.similarity_search_with_score(
@@ -175,7 +222,7 @@ def _simple_query(
         return {
             "answer": "I don't have any relevant documents to answer that question.",
             "sources": [], "chunks": 0, "confidence": 0.0,
-            "agentic_mode": False,
+            "agentic_mode": False, "refused": True,
         }
 
     chunks = [doc for doc, score in chunks_with_scores]
@@ -188,7 +235,7 @@ def _simple_query(
         return _low_confidence_response(len(chunks), avg_score, agentic=False)
 
     messages = _build_prompt(question, chunks)
-    response = _get_llm().invoke(messages)
+    response = _get_llm(collector).invoke(messages)
     parsed = _parse_llm_json(response.content, avg_score)
 
     sources = list({doc.metadata.get("source", "unknown") for doc in chunks})
@@ -215,6 +262,7 @@ def _agentic_query(
     user_role: str | None,
     qdrant_filter,
     vector_store,
+    collector=None,
 ) -> dict[str, Any]:
     """
     Agentic pipeline: Decompose → Multi-retrieve → Synthesise → Self-Critique.
@@ -227,7 +275,7 @@ def _agentic_query(
         self_critique,
     )
 
-    llm = _get_llm()
+    llm = _get_llm(collector)
     reasoning_steps = []
 
     # ── Step 1: Decompose ────────────────────────────────────────────────────
@@ -241,7 +289,7 @@ def _agentic_query(
         logger.info("Agentic: decomposed into %d sub-queries", len(sub_queries))
     except Exception as e:
         logger.warning("Decomposition crashed (%s). Falling back to simple RAG.", e)
-        return _simple_query(question, workspace_id, top_k, user_email, user_role, qdrant_filter, vector_store)
+        return _simple_query(question, workspace_id, top_k, user_email, user_role, qdrant_filter, vector_store, collector)
 
     # ── Step 2: Multi-retrieval ──────────────────────────────────────────────
     try:
@@ -255,13 +303,13 @@ def _agentic_query(
         })
     except Exception as e:
         logger.warning("Multi-retrieval crashed (%s). Falling back to simple RAG.", e)
-        return _simple_query(question, workspace_id, top_k, user_email, user_role, qdrant_filter, vector_store)
+        return _simple_query(question, workspace_id, top_k, user_email, user_role, qdrant_filter, vector_store, collector)
 
     if not merged_chunks:
         return {
             "answer": "I don't have any relevant documents to answer that question.",
             "sources": [], "chunks": 0, "confidence": 0.0,
-            "reasoning_steps": reasoning_steps, "agentic_mode": True,
+            "reasoning_steps": reasoning_steps, "agentic_mode": True, "refused": True,
         }
 
     # Same out-of-domain check as the simple path: skip the LLM entirely
@@ -282,7 +330,7 @@ def _agentic_query(
         reasoning_steps.append({"phase": "synthesis", "llm_call": 2})
     except Exception as e:
         logger.warning("Synthesis crashed (%s). Falling back to simple RAG.", e)
-        return _simple_query(question, workspace_id, top_k, user_email, user_role, qdrant_filter, vector_store)
+        return _simple_query(question, workspace_id, top_k, user_email, user_role, qdrant_filter, vector_store, collector)
 
     answer_text = parsed_answer.get("answer", "")
 
@@ -369,26 +417,33 @@ def query(
         )
     ])
     vector_store  = get_vector_store()
+    collector = UsageCollector()
 
     # Route to correct pipeline
     if AGENTIC_MODE:
         try:
-            return _agentic_query(
+            result = _agentic_query(
                 question, workspace_id, top_k,
                 user_email, user_role,
-                qdrant_filter, vector_store,
+                qdrant_filter, vector_store, collector,
             )
         except Exception as e:
             # Nuclear fallback — entire agentic function crashed
             logger.exception("Agentic pipeline completely crashed (%s). Falling back to simple RAG.", e)
-            return _simple_query(
+            result = _simple_query(
                 question, workspace_id, top_k,
                 user_email, user_role,
-                qdrant_filter, vector_store,
+                qdrant_filter, vector_store, collector,
             )
     else:
-        return _simple_query(
+        result = _simple_query(
             question, workspace_id, top_k,
             user_email, user_role,
-            qdrant_filter, vector_store,
+            qdrant_filter, vector_store, collector,
         )
+
+    # Zeros here are meaningful: a refused question costs no tokens, which is the
+    # point of refusing before generation.
+    result["usage"] = collector.as_dict()
+    result.setdefault("refused", False)
+    return result

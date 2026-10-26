@@ -252,6 +252,13 @@ if STORAGE_BACKEND not in ("local", "s3"):
 # gets access to others only when that workspace's admin adds them.
 
 MAX_WORKSPACES_PER_USER = config("MAX_WORKSPACES_PER_USER", default=5, cast=int)
+
+# USD per million tokens, for turning the recorded token counts into a cost.
+# Deliberately 0.0 by default: the rates belong to whoever runs this and change
+# without notice, so the monitoring endpoint reports $0.00 until they are set
+# rather than showing a number this project invented.
+LLM_INPUT_COST_PER_MTOK = config("LLM_INPUT_COST_PER_MTOK", default=0.0, cast=float)
+LLM_OUTPUT_COST_PER_MTOK = config("LLM_OUTPUT_COST_PER_MTOK", default=0.0, cast=float)
 MAX_QUESTION_CHARS = config("MAX_QUESTION_CHARS", default=1000, cast=int)
 MAX_TOP_K = config("MAX_TOP_K", default=10, cast=int)
 MAX_UPLOAD_MB = config("MAX_UPLOAD_MB", default=25, cast=int)
