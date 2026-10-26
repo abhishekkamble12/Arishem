@@ -40,3 +40,11 @@ ideal_frontend.md
 
 # Personal / generated interview notes (regenerated in Phase 7)
 docs/INTERVIEW_PREP.md
+
+# AI IDE planning artifacts
+.kiro/
+
+# coverage data
+.coverage
+.coverage.*
+htmlcov/

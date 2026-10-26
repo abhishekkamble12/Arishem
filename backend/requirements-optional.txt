@@ -8,3 +8,10 @@ unstructured[pptx]==0.17.2
 faster-whisper==1.2.1
 yt-dlp==2024.11.18
 pydub==0.25.1
+
+# Evaluation harness (evals/run_eval.py). Not a runtime dependency: the harness
+# is run by hand, never by the API or the worker. It was previously missing
+# entirely, which is why evals/run_eval.py could not import.
+ragas==0.2.15
+nest-asyncio==1.6.0
+python-dotenv==1.0.1
