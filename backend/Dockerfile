@@ -18,11 +18,13 @@ COPY --from=builder /opt/venv /opt/venv
 RUN useradd --create-home --shell /usr/sbin/nologin arishem
 USER arishem
 WORKDIR /home/arishem/app
+# Bake the embedding model in before copying the source: it depends only on the
+# installed packages, so this layer stays cached when application code changes.
+# Copying first would re-download the model on every rebuild.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
 COPY --chown=arishem:arishem . .
 RUN mkdir -p local_storage
-
-# Bake the embedding model into the image so the first query doesn't download it.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # collectstatic needs settings to import; these values are build-time placeholders only.
 RUN SECRET_KEY=build-time-placeholder DEBUG=False python manage.py collectstatic --noinput

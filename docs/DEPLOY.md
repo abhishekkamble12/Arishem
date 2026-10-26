@@ -117,11 +117,12 @@ aws s3 rb s3://<DocumentsBucketName> --force
 
 ## Known gaps
 
-- **The refusal threshold is not calibrated for a real corpus.** `RAG_CONFIDENCE_THRESHOLD`
-  defaults to 0.35 in code. Measured retrieval scores on a small test corpus ran
-  0.19–0.32, which would make the deployed system refuse good questions. Upload a
-  real corpus, look at the scores in `PredictionLog`, then set the value
-  deliberately. Until that is done, treat the number as a guess.
+- **The refusal threshold has only been checked against one document.** On an
+  end-to-end run (real S3, Qdrant and Groq) a question answerable from an uploaded
+  retention policy scored **0.712** and an unrelated question scored **-0.076**, so
+  the 0.35 default sits well between them. That is one document, not a calibration:
+  watch `confidence` in `PredictionLog` as a real corpus grows and move
+  `RAG_CONFIDENCE_THRESHOLD` if good questions start being refused.
 - **No backups.** Postgres and Qdrant live on one EBS volume with no snapshot
   schedule. Add one before this holds anything you care about.
 - **One instance is one point of failure.** A reboot is downtime.
