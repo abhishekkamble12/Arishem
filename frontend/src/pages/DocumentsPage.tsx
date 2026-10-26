@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, useActiveRole } from '../store/authStore';
 import { useDocuments } from '../hooks/useDocuments';
 import { aiApi, IngestedFile } from '../api/ai';
 import {
@@ -11,7 +11,7 @@ type UploadMode = 'direct' | 's3key';
 const ACCEPTED = '.pdf,.docx,.pptx,.mp4,.mov,.avi,.mkv,.mp3,.wav,.flac,.ogg,.m4a';
 
 export const DocumentsPage: React.FC = () => {
-  const { activeWorkspaceId, user } = useAuthStore();
+  const { activeWorkspaceId } = useAuthStore();
   const { files, isLoading, isPolling, refetch, deleteFile } = useDocuments();
 
   const [mode, setMode] = useState<UploadMode>('direct');
@@ -109,7 +109,8 @@ export const DocumentsPage: React.FC = () => {
   const displayName = (file: IngestedFile) => file.original_filename || file.s3_key.split('/').pop() || file.s3_key;
 
   const canSubmit = mode === 'direct' ? !!selectedFile : !!s3Key.trim();
-  const canDelete = user?.role === 'admin' || user?.role === 'editor';
+  const role = useActiveRole();
+  const canDelete = role === 'admin' || role === 'editor';
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 animate-slide-up space-y-8">

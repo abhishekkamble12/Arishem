@@ -1,11 +1,12 @@
 import React from 'react';
 import { FEATURES } from '../../config';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../../store/authStore';
-import { LogOut, Database, Upload, User as MessageSquare, BarChart2, Video, Settings, Layers } from 'lucide-react';
+import { useAuthStore, useActiveRole } from '../../store/authStore';
+import { LogOut, Database, Upload, User as MessageSquare, BarChart2, Video, Settings, Layers, Users } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, clearAuth, activeWorkspaceId, setActiveWorkspaceId } = useAuthStore();
+  const role = useActiveRole();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -68,7 +69,7 @@ export const Navbar: React.FC = () => {
             <span>Chat Session</span>
           </Link>
 
-          {user && (user.role === 'admin' || user.role === 'editor') && (
+          {user && (role === 'admin' || role === 'editor') && (
             <Link
               to="/documents"
               className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
@@ -96,7 +97,7 @@ export const Navbar: React.FC = () => {
           </Link>
           )}
 
-          {user && (user.role === 'admin' || user.role === 'editor') && (
+          {user && (role === 'admin' || role === 'editor') && (
             <Link
               to="/monitoring"
               className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
@@ -107,6 +108,20 @@ export const Navbar: React.FC = () => {
             >
               <BarChart2 className="w-3.5 h-3.5" />
               <span>Monitoring</span>
+            </Link>
+          )}
+
+          {role === 'admin' && (
+            <Link
+              to="/members"
+              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
+                isActive('/members')
+                  ? 'bg-brand-600 text-white shadow-md'
+                  : 'text-dark-400 hover:text-dark-100 hover:bg-dark-800/30'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Members</span>
             </Link>
           )}
 
@@ -147,8 +162,8 @@ export const Navbar: React.FC = () => {
             <div className="hidden sm:flex flex-col items-end text-right">
               <span className="text-xs font-bold text-dark-100">{user.username}</span>
               <div className="flex items-center space-x-2 mt-0.5">
-                <span className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded border ${getRoleBadgeClass(user.role)}`}>
-                  {user.role}
+                <span className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded border ${getRoleBadgeClass(role)}`}>
+                  {role}
                 </span>
               </div>
             </div>

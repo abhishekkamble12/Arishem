@@ -10,6 +10,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ChatPage } from './pages/ChatPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { MeetingsPage } from './pages/MeetingsPage';
+import { MembersPage } from './pages/MembersPage';
 import MonitoringPage from './pages/MonitoringPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { GithubCallbackPage } from './pages/GithubCallbackPage';
@@ -54,6 +55,11 @@ export const App: React.FC = () => {
             <Route element={<ProtectedRoute allowedRoles={['admin', 'editor']} />}>
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/monitoring" element={<MonitoringPage />} />
+            </Route>
+
+            {/* Workspace admins only */}
+            <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+              <Route path="/members" element={<MembersPage />} />
             </Route>
           </Route>
         </Route>

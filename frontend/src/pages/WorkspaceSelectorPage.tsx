@@ -1,10 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Database, LogOut, ArrowRight, Shield, Layers } from 'lucide-react';
+import { Database, LogOut, ArrowRight, Shield, Layers, Plus } from 'lucide-react';
+import { workspaceApi } from '../api/workspace';
 
 export const WorkspaceSelectorPage: React.FC = () => {
-  const { user, activeWorkspaceId, setActiveWorkspaceId, workspaces, clearAuth } = useAuthStore();
+  const { activeWorkspaceId, setActiveWorkspaceId, workspaces, clearAuth, refreshWorkspaces } = useAuthStore();
+  const [newName, setNewName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -12,10 +15,28 @@ export const WorkspaceSelectorPage: React.FC = () => {
     if (workspaces.length === 1) {
       setActiveWorkspaceId(workspaces[0].id);
       navigate('/');
-    } else if (workspaces.length === 0) {
-      // In case they don't have workspaces, but normally they should have at least 1.
     }
   }, [workspaces, setActiveWorkspaceId, navigate]);
+
+  // Roles can change while the page is open in another tab; always show the server's view.
+  useEffect(() => {
+    void refreshWorkspaces();
+  }, [refreshWorkspaces]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setCreateError(null);
+    try {
+      const ws = await workspaceApi.createWorkspace(newName.trim());
+      await refreshWorkspaces();
+      setActiveWorkspaceId(ws.id);
+      navigate('/');
+    } catch (err) {
+      const data = (err as { response?: { data?: { error?: string } } }).response?.data;
+      setCreateError(data?.error ?? 'Could not create workspace');
+    }
+  };
 
   const handleSelect = (id: number) => {
     setActiveWorkspaceId(id);
@@ -63,7 +84,7 @@ export const WorkspaceSelectorPage: React.FC = () => {
             <Layers className="w-10 h-10 mx-auto text-dark-500 mb-3" />
             <h3 className="text-sm font-semibold text-white">No workspaces found</h3>
             <p className="text-xs text-dark-400 mt-1">
-              Your account has not been assigned to any workspace. Please contact your system administrator.
+              You are not in any workspace yet. Create one below, or ask a workspace admin to add you.
             </p>
           </div>
         ) : (
@@ -105,7 +126,7 @@ export const WorkspaceSelectorPage: React.FC = () => {
                     <div className="flex items-center space-x-1.5">
                       <Shield className="w-3.5 h-3.5 text-brand-500" />
                       <span className="capitalize font-semibold text-brand-400">
-                        {user?.role || 'viewer'}
+                        {ws.role}
                       </span>
                     </div>
                     <span className="flex items-center space-x-1 font-semibold group-hover:translate-x-1 transition-transform">
@@ -118,6 +139,25 @@ export const WorkspaceSelectorPage: React.FC = () => {
             })}
           </div>
         )}
+
+        {/* Create a workspace for a team or project */}
+        <form onSubmit={handleCreate} className="mt-6 flex items-center gap-2">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            maxLength={100}
+            placeholder="New workspace name, e.g. Payments team"
+            className="flex-1 bg-dark-950/60 border border-dark-800 rounded-xl px-3 py-2 text-xs text-dark-100 focus:outline-none focus:border-brand-500"
+          />
+          <button
+            type="submit"
+            className="flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white rounded-xl"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create</span>
+          </button>
+        </form>
+        {createError && <p className="text-xs text-red-400 mt-2">{createError}</p>}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { workspaceApi, type Workspace } from '../api/workspace';
+import { workspaceApi, type Role, type Workspace } from '../api/workspace';
 
 export type { Workspace } from '../api/workspace';
 
@@ -7,7 +7,7 @@ export interface User {
   id: number;
   email: string;
   username: string;
-  role: 'admin' | 'editor' | 'viewer';
+  role: Role;
   workspaces: Workspace[];
   date_joined: string;
   is_active: boolean;
@@ -150,3 +150,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
   };
 });
+
+/** The caller's role in the workspace they are currently working in (roles are per workspace). */
+export const useActiveRole = (): Role => {
+  const workspaces = useAuthStore((s) => s.workspaces);
+  const activeId = useAuthStore((s) => s.activeWorkspaceId);
+  return workspaces.find((w) => w.id === activeId)?.role ?? 'viewer';
+};

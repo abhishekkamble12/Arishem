@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, useActiveRole } from '../store/authStore';
 import { useDocuments } from '../hooks/useDocuments';
 import {
   MessageSquare, FileText, Upload, BarChart3, Settings, 
@@ -9,6 +9,7 @@ import {
 
 export const DashboardPage: React.FC = () => {
   const { user, activeWorkspaceId } = useAuthStore();
+  const role = useActiveRole();
   const { files, isLoading, hasActiveJobs, activeJobsCount } = useDocuments();
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
@@ -252,7 +253,7 @@ export const DashboardPage: React.FC = () => {
                 <ChevronRight className="w-4 h-4 text-dark-500 group-hover:translate-x-0.5 transition-transform" />
               </Link>
 
-              {user?.role !== 'viewer' && (
+              {role !== 'viewer' && (
                 <Link
                   to="/monitoring"
                   className="flex items-center justify-between p-3 rounded-xl bg-dark-950/60 border border-dark-800/60 hover:border-brand-500/50 hover:bg-dark-900/60 transition-all text-xs group"
