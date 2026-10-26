@@ -49,5 +49,8 @@ docs/INTERVIEW_PREP.md
 .coverage.*
 htmlcov/
 
-# evaluation: regenerable cache (the committed evidence is eval_results.json)
+# evaluation: resumable cache of answers and scores (regenerable; the committed
+# evidence is eval_results.json)
+evals/.eval_cache.json
+evals/.eval_cache.json.tmp
 evals/answers_cache.json

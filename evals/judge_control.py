@@ -36,7 +36,7 @@ from ragas.llms import LangchainLLMWrapper  # noqa: E402
 from ragas.metrics import faithfulness  # noqa: E402
 from ragas.run_config import RunConfig  # noqa: E402
 
-JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "openai/gpt-oss-120b")
+JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "qwen/qwen3.8-27b")  # same default as run_eval.py
 
 CONTEXT = [
     "SOP-104 Data Retention Policy. All API prediction logs must be retained for "

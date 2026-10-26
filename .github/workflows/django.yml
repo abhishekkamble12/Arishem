@@ -42,6 +42,12 @@ jobs:
           coverage run --source=app,Services --omit="*/migrations/*,*/test*.py" manage.py test --verbosity=1 --settings=backend.test_settings
           coverage report --skip-empty
 
+      # The evaluation's scoring rules are pure Python with no model calls, so they
+      # are checked on every push: a wrong metric produces confident wrong numbers.
+      - name: Evaluation metric tests
+        working-directory: evals
+        run: python -m unittest discover -p "test_*.py" -v
+
   secrets-scan:
     runs-on: ubuntu-latest
     steps:

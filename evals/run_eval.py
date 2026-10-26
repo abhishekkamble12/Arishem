@@ -1,487 +1,581 @@
+"""
+Arishem RAG evaluation harness.
+
+    python evals/run_eval.py                      # generate, judge, report (all resumable)
+    EVAL_SKIP_JUDGE=1  python evals/run_eval.py   # deterministic metrics only, no judge tokens
+    EVAL_REPORT_ONLY=1 python evals/run_eval.py   # rebuild SCORECARD.md, no model calls at all
+    python evals/judge_control.py                 # prove the judge can fail
+
+Indexes every document in pcaps/ into an in-memory Qdrant with the production
+chunking settings, runs the labelled golden set (evals/golden_set.json) through
+the real query pipeline, and scores it two ways:
+
+  deterministic   key-fact correctness, retrieval hit@k / MRR / recall, abstention
+                  precision and recall, prompt-injection resistance (evals/metrics.py)
+  LLM-judged      RAGAS faithfulness, by a judge from a different model family
+
+Generation and judging are both resumable. Every answer and every score is written
+to evals/.eval_cache.json the moment it exists, so running into the Groq free
+tier's daily token cap pauses the run instead of losing it: rerun the same command
+later and it continues where it stopped.
+"""
+
 import asyncio
+import datetime
+import hashlib
 import json
 import os
+import statistics
 import sys
 import time
 
 import nest_asyncio
 
-# Apply nest_asyncio to allow nested event loops in case ragas or langchain needs it
-nest_asyncio.apply()
+nest_asyncio.apply()  # ragas runs its own event loop inside ours
 
-# Add parent directory to path so we can import backend modules
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, ".."))
+sys.path.insert(0, os.path.join(ROOT, "backend"))
+sys.path.insert(0, HERE)
 
-import dotenv
+import dotenv  # noqa: E402
 
 # The backend reads backend/backend/.env (python-decouple searches upward from
-# settings.py), so load the same file here rather than a path that never existed.
-dotenv.load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend", "backend", ".env")))
-
-# Services.storage reads settings.BASE_DIR at import time, so Django has to be
-# configured before anything under Services is imported. Without this the harness
-# cannot even start.
+# settings.py and caches the first file it finds), so load the same one here.
+dotenv.load_dotenv(os.path.join(ROOT, "backend", "backend", ".env"))
+# Services.storage reads settings.BASE_DIR at import time, so Django must be
+# configured before anything under Services is imported.
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 os.environ.setdefault("SECRET_KEY", "eval-harness-only")
 
-import django
+import django  # noqa: E402
 
 django.setup()
 
-import Services.agent as agent_mod
-import Services.Ai_service.embedding as embedding_mod
-from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_core.documents import Document
-from langchain_qdrant import QdrantVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams
+import Services.agent as agent_mod  # noqa: E402
+import Services.Ai_service.embedding as embedding_mod  # noqa: E402
+from langchain_community.document_loaders import PyMuPDFLoader  # noqa: E402
+from langchain_core.documents import Document  # noqa: E402
+from langchain_qdrant import QdrantVectorStore  # noqa: E402
+from metrics import (  # noqa: E402
+    abstention_report,
+    contains_any,
+    is_abstention,
+    key_fact_score,
+    mean_or_none,
+    retrieval_ranks,
+)
+from qdrant_client import QdrantClient  # noqa: E402
+from qdrant_client.http import models as qdrant_models  # noqa: E402
+from qdrant_client.http.models import Distance, VectorParams  # noqa: E402
+from Services.Extractor import CHUNK_OVERLAP, CHUNK_SIZE, normalise_newlines, split_pages  # noqa: E402
 
-# ── Eval configuration (recorded in the scorecard so results are reproducible)
-# Default to whatever the application uses, so the two cannot drift apart.
+
+def _flag(name: str) -> bool:
+    return os.getenv(name, "").lower() in ("1", "true", "yes")
+
+
+# ── Configuration (all of it is recorded in the scorecard) ───────────────────
+CORPUS_DIR = os.path.join(ROOT, "pcaps")
+GOLDEN_FILE = os.path.join(HERE, "golden_set.json")
+CACHE_FILE = os.path.join(HERE, ".eval_cache.json")
+RESULTS_FILE = os.path.join(HERE, "eval_results.json")
+SCORECARD_FILE = os.path.join(HERE, "SCORECARD.md")
+
+# The threshold and top_k default to the application's own values, so the eval
+# measures what actually ships and the two cannot drift apart.
 CONFIDENCE_THRESHOLD = float(os.getenv("EVAL_CONFIDENCE_THRESHOLD", agent_mod.CONFIDENCE_THRESHOLD))
 TOP_K = agent_mod.TOP_K
-# Mirrors Services/Extractor.py — kept local because importing it requires Django
-CHUNK_SIZE, CHUNK_OVERLAP = 800, 150
-JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "openai/gpt-oss-120b")
-# Generation is expensive and scoring is rate-limited, so the two are
-# decoupled: answers are cached, and EVAL_REUSE_ANSWERS=1 scores the cache
-# without spending generation tokens again.
-ANSWERS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "answers_cache.json")
-REUSE_ANSWERS = os.getenv("EVAL_REUSE_ANSWERS", "").lower() in ("1", "true", "yes")
-# Four metrics over 30 questions is ~120 judge calls, which exhausts a free
-# Groq daily token budget. On a corpus small enough that every query retrieves
-# everything, the context metrics cannot discriminate anyway, so EVAL_METRICS
-# lets the budget go to the two that can.
-EVAL_METRICS = [m.strip() for m in os.getenv(
-    "EVAL_METRICS", "faithfulness,answer_relevancy,context_precision,context_recall"
-).split(",") if m.strip()]
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+GENERATOR_MODEL = agent_mod.GROQ_MODEL
+# A different model family from the generator, so it is not grading its own
+# output. evals/judge_control.py checks that this judge scores fabrication low.
+JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "qwen/qwen3.8-27b")
+JUDGE_METRICS = [m.strip() for m in os.getenv("EVAL_METRICS", "faithfulness").split(",") if m.strip()]
+JUDGE_BATCH = int(os.getenv("EVAL_JUDGE_BATCH", "6"))
+SLEEP_BETWEEN_QUESTIONS = float(os.getenv("EVAL_SLEEP", "2"))
 
 agent_mod.CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD
-EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
+# The application falls back to a second model when the first fails. In an eval
+# that would silently mix two generators into one score, so the fallback is off
+# unless asked for, and the model behind every answer is recorded regardless.
+if not _flag("EVAL_ALLOW_FALLBACK"):
+    agent_mod.GROQ_FALLBACK_MODEL = agent_mod.GROQ_MODEL
+    agent_mod._llm = None
 
-# Initialize local in-memory Qdrant
-local_client = QdrantClient(location=":memory:")
 
-def mock_get_vector_store():
-    return QdrantVectorStore(
-        client=local_client,
+# ── Corpus ───────────────────────────────────────────────────────────────────
+qdrant = QdrantClient(location=":memory:")
+
+
+def vector_store() -> QdrantVectorStore:
+    return QdrantVectorStore(client=qdrant, collection_name="documents",
+                             embedding=embedding_mod.get_embeddings(), vector_name="content-dense")
+
+
+class RecordingStore:
+    """
+    Passes searches through to the real store and remembers every chunk returned.
+
+    Agentic mode retrieves once per sub-question, so the chunks the model actually
+    saw are not the top-k for the original question. Faithfulness has to be judged
+    against what the model saw, or a correct multi-hop answer is marked unsupported.
+    """
+
+    def __init__(self, store):
+        self._store = store
+        self.seen: list[Document] = []
+
+    def similarity_search_with_score(self, *args, **kwargs):
+        results = self._store.similarity_search_with_score(*args, **kwargs)
+        self.seen.extend(doc for doc, _ in results)
+        return results
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    def contexts(self) -> list[str]:
+        unique, seen_text = [], set()
+        for doc in self.seen:
+            if doc.page_content not in seen_text:
+                seen_text.add(doc.page_content)
+                unique.append(doc.page_content)
+        return unique
+
+
+def load_corpus() -> tuple[list[Document], str]:
+    """Every document in pcaps/, chunked like production. Returns (chunks, fingerprint)."""
+    docs, digest = [], hashlib.sha256()
+    for name in sorted(os.listdir(CORPUS_DIR)):
+        path = os.path.join(CORPUS_DIR, name)
+        suffix = os.path.splitext(name)[1].lower()
+        if suffix not in (".pdf", ".txt", ".md"):
+            continue
+        if suffix == ".pdf":
+            with open(path, "rb") as fh:
+                digest.update(name.encode() + fh.read())
+            pages = PyMuPDFLoader(path).load()
+        else:
+            # Fingerprint the normalised text, not the file's bytes: git checks these
+            # out with CRLF on Windows and LF elsewhere, and hashing bytes gave the
+            # same corpus a different fingerprint on each platform.
+            with open(path, encoding="utf-8", newline="") as fh:
+                text = normalise_newlines(fh.read())
+            digest.update(name.encode() + text.encode("utf-8"))
+            pages = [Document(page_content=text)]
+        for page in pages:
+            page.metadata = {"source": name, "workspace_id": 1}
+        docs.extend(pages)
+
+    # Production's own splitter rather than a copy of its settings, so the eval
+    # chunks exactly as ingestion does.
+    digest.update(f"{CHUNK_SIZE}/{CHUNK_OVERLAP}/{EMBEDDING_MODEL}".encode())
+    return split_pages(docs), digest.hexdigest()[:16]
+
+
+def index_corpus(chunks: list[Document]) -> None:
+    if qdrant.collection_exists("documents"):
+        qdrant.delete_collection("documents")
+    qdrant.create_collection(
         collection_name="documents",
-        embedding=embedding_mod.get_embeddings(),
-        vector_name="content-dense",
+        vectors_config={"content-dense": VectorParams(size=384, distance=Distance.COSINE)},
     )
-
-# Patch both modules
-embedding_mod.get_vector_store = mock_get_vector_store
-agent_mod.get_vector_store = mock_get_vector_store
-
-def load_documents():
-    docs = []
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pcaps"))
-
-    # 1. PDF
-    pdf_path = os.path.join(base_dir, "SOP-104_Data_Retention_Policy.pdf")
-    if os.path.exists(pdf_path):
-        loader = PyMuPDFLoader(pdf_path)
-        pdf_docs = loader.load()
-        for d in pdf_docs:
-            d.metadata["workspace_id"] = 1
-            d.metadata["source"] = os.path.basename(pdf_path)
-        docs.extend(pdf_docs)
-
-    # 2. TXT
-    txt_path = os.path.join(base_dir, "HR-201_Leave_Policy.txt")
-    if os.path.exists(txt_path):
-        with open(txt_path, encoding="utf-8") as f:
-            docs.append(Document(page_content=f.read(), metadata={"source": "HR-201_Leave_Policy.txt", "workspace_id": 1}))
-
-    # 3. MD
-    md_path = os.path.join(base_dir, "Engineering_Onboarding.md")
-    if os.path.exists(md_path):
-        with open(md_path, encoding="utf-8") as f:
-            docs.append(Document(page_content=f.read(), metadata={"source": "Engineering_Onboarding.md", "workspace_id": 1}))
-
-    # Chunk exactly like the production ingestion pipeline does
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-    return splitter.split_documents(docs)
-
-def setup_qdrant(docs):
-    if local_client.collection_exists(collection_name="documents"):
-        local_client.delete_collection(collection_name="documents")
-
-    local_client.create_collection(
-        collection_name="documents",
-        vectors_config={
-            "content-dense": VectorParams(
-                size=384, # all-MiniLM-L6-v2 dimension
-                distance=Distance.COSINE,
-            )
-        },
-    )
-
-    vector_store = mock_get_vector_store()
-    vector_store.add_documents(docs)
-    print(f"Added {len(docs)} chunks to Qdrant.")
-
-REFUSAL_GROUND_TRUTH = "I don't have enough information to answer that."
+    vector_store().add_documents(chunks)
 
 
-def is_answerable(item) -> bool:
-    """
-    Whether the corpus should be able to answer this question. Explicit
-    "answerable" wins; otherwise a ground truth that is itself a refusal marks
-    the question as a negative example.
-    """
-    if "answerable" in item:
-        return bool(item["answerable"])
-    return item["ground_truth"].strip().lower() != REFUSAL_GROUND_TRUTH.lower()
+WORKSPACE_FILTER = qdrant_models.Filter(must=[qdrant_models.FieldCondition(
+    key="metadata.workspace_id", match=qdrant_models.MatchValue(value=1))])
 
 
-def threshold_sweep(per_question):
-    """
-    What the refusal threshold would have done, at every value, from one run.
+# ── Cache ────────────────────────────────────────────────────────────────────
+def load_cache(fingerprint: dict) -> dict:
+    """Reuse cached answers only if nothing that shapes an answer has changed."""
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, encoding="utf-8") as fh:
+            cache = json.load(fh)
+        if cache.get("fingerprint") == fingerprint:
+            return cache
+        changed = [k for k in fingerprint if cache.get("fingerprint", {}).get(k) != fingerprint[k]]
+        print(f"Cache ignored: {', '.join(changed)} changed since it was written.")
+    return {"fingerprint": fingerprint, "answers": {}, "scores": {}}
 
-    Retrieval confidence does not depend on the threshold, so the whole curve
-    comes out of a single pass. This is the calibration the default was missing.
-    """
-    answerable = [q for q in per_question if q["answerable"]]
-    unanswerable = [q for q in per_question if not q["answerable"]]
+
+def save_cache(cache: dict) -> None:
+    tmp = CACHE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cache, fh, indent=1, default=str)
+    os.replace(tmp, CACHE_FILE)  # atomic: an interrupted write never corrupts the cache
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "rate_limit" in text or "ratelimit" in text or "429" in text or "tokens per day" in text
+
+
+# ── Generation ───────────────────────────────────────────────────────────────
+def generate(golden: list[dict], cache: dict) -> bool:
+    """Answer every question not already cached. Returns False if stopped early."""
+    answers = cache["answers"]
+    todo = [g for g in golden if answers.get(g["id"], {}).get("question") != g["question"]]
+    print(f"Generation: {len(golden) - len(todo)} cached, {len(todo)} to run.")
+    for n, item in enumerate(todo, 1):
+        recorder = RecordingStore(vector_store())
+        agent_mod.get_vector_store = lambda r=recorder: r
+        started = time.perf_counter()
+        try:
+            res = agent_mod.query(question=item["question"], workspace_id=1, top_k=TOP_K)
+        except Exception as exc:
+            if _is_rate_limit(exc):
+                print(f"\nStopped at {n}/{len(todo)}: generator hit a rate limit ({exc}). "
+                      "Rerun later to continue — nothing is lost.")
+                save_cache(cache)
+                return False
+            print(f"  error on {item['id']}: {exc}")
+            continue
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        # Ranked sources for the question as asked: the retrieval metrics' basis.
+        ranked = vector_store().similarity_search(item["question"], k=TOP_K, filter=WORKSPACE_FILTER)
+        answers[item["id"]] = {
+            "question": item["question"],
+            "answer": res.get("answer", ""),
+            "confidence": res.get("confidence"),
+            "refused": bool(res.get("refused")),
+            "latency_ms": latency_ms,
+            "usage": res.get("usage") or {},
+            "retrieved_sources": [d.metadata.get("source") for d in ranked],
+            "contexts": recorder.contexts(),
+        }
+        save_cache(cache)
+        print(f"  [{n}/{len(todo)}] {item['id']:8} {latency_ms / 1000:5.1f}s  {str(res.get('answer'))[:70]}")
+        time.sleep(SLEEP_BETWEEN_QUESTIONS)
+    return True
+
+
+# ── LLM-judged metrics ───────────────────────────────────────────────────────
+def judge(golden: list[dict], cache: dict) -> bool:
+    """Score every substantive answer not yet scored by this judge. Resumable."""
+    from datasets import Dataset
+    from langchain_groq import ChatGroq
+    from ragas import evaluate
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
+    from ragas.run_config import RunConfig
+
+    available = {"faithfulness": faithfulness, "answer_relevancy": answer_relevancy,
+                 "context_precision": context_precision, "context_recall": context_recall}
+    unknown = [m for m in JUDGE_METRICS if m not in available]
+    if unknown:
+        raise SystemExit(f"Unknown EVAL_METRICS {unknown}; choose from {sorted(available)}")
+
+    scores = cache["scores"].setdefault(JUDGE_MODEL, {})
+    # An abstention makes no factual claim: judging it would only add a vacuous
+    # 1.0. Unanswerable questions the system answered anyway ARE judged — that is
+    # exactly where an invented answer would show up.
+    pending = [g for g in golden
+               if g["id"] in cache["answers"]
+               and not is_abstention(cache["answers"][g["id"]]["answer"], cache["answers"][g["id"]]["refused"])
+               and any(m not in scores.get(g["id"], {}) for m in JUDGE_METRICS)]
+    print(f"\nJudging with {JUDGE_MODEL}: {len(pending)} answers pending.")
+    if not pending:
+        return True
+
+    llm = LangchainLLMWrapper(ChatGroq(model=JUDGE_MODEL, temperature=0, timeout=90, max_retries=3))
+    embeddings = LangchainEmbeddingsWrapper(embedding_mod.get_embeddings())
+    metrics = [available[m] for m in JUDGE_METRICS]
+
+    for start in range(0, len(pending), JUDGE_BATCH):
+        batch = pending[start:start + JUDGE_BATCH]
+        data = {"question": [], "answer": [], "contexts": [], "ground_truth": [], "reference": []}
+        for g in batch:
+            a = cache["answers"][g["id"]]
+            data["question"].append(g["question"])
+            data["answer"].append(a["answer"])
+            data["contexts"].append(a["contexts"] or [""])
+            data["ground_truth"].append(g["ground_truth"])
+            data["reference"].append(g["ground_truth"])
+        result = evaluate(Dataset.from_dict(data), metrics=metrics, llm=llm, embeddings=embeddings,
+                          raise_exceptions=False, run_config=RunConfig(max_workers=1, timeout=180))
+        frame = result.to_pandas()
+        got = 0
+        for g, row in zip(batch, frame.to_dict("records"), strict=True):
+            for m in JUDGE_METRICS:
+                value = row.get(m)
+                if value is not None and value == value:  # NaN means the judge call failed
+                    scores.setdefault(g["id"], {})[m] = float(value)
+                    got += 1
+        save_cache(cache)
+        print(f"  judged {min(start + JUDGE_BATCH, len(pending))}/{len(pending)} ({got} scores this batch)")
+        if got == 0:
+            print("Stopped: a whole batch failed, which on the free tier means the judge's daily "
+                  "token cap. Rerun later to continue — scores so far are kept.")
+            return False
+    return True
+
+
+# ── Assemble results ─────────────────────────────────────────────────────────
+def build_rows(golden: list[dict], cache: dict) -> list[dict]:
+    scores = cache["scores"].get(JUDGE_MODEL, {})
     rows = []
-    for threshold in [round(0.02 * i, 2) for i in range(1, 11)] + [0.25, 0.30, 0.35, 0.40]:
-        # A question is refused when its confidence falls below the threshold.
-        wrongly_refused = sum(1 for q in answerable if (q["confidence"] or 0) < threshold)
-        wrongly_answered = sum(1 for q in unanswerable if (q["confidence"] or 0) >= threshold)
+    for g in golden:
+        a = cache["answers"].get(g["id"])
+        if not a:
+            continue
+        hit, rr, recall = retrieval_ranks(a["retrieved_sources"], g.get("relevant_sources"))
         rows.append({
-            "threshold": threshold,
-            "answerable_refused": wrongly_refused,
-            "answerable_total": len(answerable),
-            "unanswerable_answered": wrongly_answered,
-            "unanswerable_total": len(unanswerable),
-            "mistakes": wrongly_refused + wrongly_answered,
+            "id": g["id"], "category": g["category"], "question": g["question"],
+            "ground_truth": g["ground_truth"], "answerable": g["answerable"],
+            "answer": a["answer"], "confidence": a["confidence"], "refused": a["refused"],
+            "abstained": is_abstention(a["answer"], a["refused"]),
+            "correctness": key_fact_score(a["answer"], g.get("key_facts"), g.get("forbidden")),
+            "hijacked": contains_any(a["answer"], g.get("forbidden")),
+            "retrieval_hit": hit, "reciprocal_rank": rr, "retrieval_recall": recall,
+            "retrieved_sources": a["retrieved_sources"],
+            "relevant_sources": g.get("relevant_sources"),
+            "latency_ms": a["latency_ms"], "usage": a.get("usage", {}),
+            **{m: scores.get(g["id"], {}).get(m) for m in JUDGE_METRICS},
         })
     return rows
 
 
-def write_outputs(results, per_question, n_golden):
-    """Attach the judge's scores to each question, then write both reports."""
-    import datetime
+def threshold_sweep(rows: list[dict]) -> list[dict]:
+    """
+    What the retrieval-confidence threshold alone would do at each value.
 
-    frame = results.to_pandas()
-    metric_names = [c for c in frame.columns if c in
-                    ("faithfulness", "answer_relevancy", "context_precision", "context_recall")]
-    for row, item in zip(frame.to_dict("records"), per_question, strict=False):
-        item.update({m: row.get(m) for m in metric_names})
+    Confidence does not depend on the threshold, so one run gives the whole curve.
+    Note this measures only the first line of defence: a question that clears the
+    threshold can still be declined by the model itself, which the abstention
+    metrics count.
+    """
+    answerable = [r for r in rows if r["answerable"]]
+    unanswerable = [r for r in rows if not r["answerable"]]
+    sweep = []
+    for t in [0.02, 0.04, 0.06, 0.065, 0.08, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30, 0.35]:
+        wr = sum(1 for r in answerable if (r["confidence"] or 0) < t)
+        wa = sum(1 for r in unanswerable if (r["confidence"] or 0) >= t)
+        sweep.append({"threshold": t, "answerable_refused": wr, "answerable_total": len(answerable),
+                      "unanswerable_passed": wa, "unanswerable_total": len(unanswerable),
+                      "mistakes": wr + wa})
+    return sweep
 
+
+# ── Report ───────────────────────────────────────────────────────────────────
+def _pct(value) -> str:
+    return "n/a" if value is None else f"{value:.0%}"
+
+
+def _num(value, digits=3) -> str:
+    return "n/a" if value is None else f"{value:.{digits}f}"
+
+
+CATEGORY_ORDER = ["single_fact", "distractor", "multi_hop", "paraphrase", "injection",
+                  "unanswerable_in_domain", "unanswerable_out_of_domain"]
+
+
+def render_report(rows: list[dict], config: dict) -> None:
+    answerable = [r for r in rows if r["answerable"]]
+    unanswerable = [r for r in rows if not r["answerable"]]
+    judged_metrics = config["judge_metrics"]
+    faith_rows = [r for r in rows if r.get("faithfulness") is not None]
+    abst = abstention_report(rows)
+    injection = [r for r in rows if r["category"] == "injection"]
+    lat = [r["latency_ms"] for r in rows if not r["abstained"]]
+    tokens = [(r["usage"].get("prompt_tokens") or 0) + (r["usage"].get("completion_tokens") or 0)
+              for r in rows if r["usage"]]
+    models = sorted({m for r in rows for m in (r["usage"].get("models") or [])})
+
+    L = [
+        "# RAG Evaluation Scorecard",
+        "",
+        "_Generated by `evals/run_eval.py` — do not edit by hand. Per-question results: "
+        "`eval_results.json`._",
+        "",
+        f"{len(rows)} questions ({len(answerable)} answerable, {len(unanswerable)} unanswerable) "
+        f"over {config['corpus_documents']} documents in {config['corpus_chunks']} chunks, so "
+        f"retrieval chooses {config['top_k']} of {config['corpus_chunks']}.",
+        "",
+        "## Headline",
+        "",
+        "| Metric | Value | Over |",
+        "| --- | --- | --- |",
+        f"| Answer correctness (key facts present) | **{_pct(mean_or_none([r['correctness'] for r in answerable]))}** | {len(answerable)} answerable |",
+        f"| Fully correct answers | {sum(1 for r in answerable if r['correctness'] == 1.0)}/{len(answerable)} | answerable |",
+    ]
+    if "faithfulness" in judged_metrics:
+        L.append(f"| Faithfulness (RAGAS, judged) | **{_num(mean_or_none([r['faithfulness'] for r in faith_rows]))}** "
+                 f"| {len(faith_rows)} substantive answers |")
+    for m in judged_metrics:
+        if m != "faithfulness":
+            vals = [r.get(m) for r in rows if r.get(m) is not None]
+            L.append(f"| {m.replace('_', ' ').title()} (RAGAS) | {_num(mean_or_none(vals))} | {len(vals)} answers |")
+    L += [
+        f"| Retrieval hit@{config['top_k']} | {_pct(mean_or_none([r['retrieval_hit'] for r in answerable]))} | answerable |",
+        f"| Retrieval MRR | {_num(mean_or_none([r['reciprocal_rank'] for r in answerable]))} | answerable |",
+        f"| Abstention precision | {_pct(abst['precision'])} | questions it declined |",
+        f"| Abstention recall | {_pct(abst['recall'])} | {len(unanswerable)} unanswerable |",
+        f"| Answered an unanswerable question | {_pct(abst['hallucinated'])} | unanswerable |",
+        f"| Wrongly declined an answerable question | {_pct(abst['false_abstain'])} | answerable |",
+        f"| Prompt injection resisted | {sum(1 for r in injection if not r['hijacked'])}/{len(injection)} | injection |",
+        f"| Latency, substantive answers | median {statistics.median(lat) / 1000:.1f} s, "
+        f"p95 {sorted(lat)[max(0, int(len(lat) * 0.95) - 1)] / 1000:.1f} s | |" if lat else "| Latency | n/a | |",
+        f"| Tokens per question | mean {statistics.mean(tokens):,.0f} | |" if tokens else "| Tokens | n/a | |",
+    ]
+
+    # Per category
+    L += ["", "## By category", "",
+          "| Category | n | Correctness | Faithfulness | Hit@k | Declined |",
+          "| --- | --- | --- | --- | --- | --- |"]
+    for cat in CATEGORY_ORDER:
+        cr = [r for r in rows if r["category"] == cat]
+        if not cr:
+            continue
+        L.append(
+            f"| {cat.replace('_', ' ')} | {len(cr)} "
+            f"| {_pct(mean_or_none([r['correctness'] for r in cr]))} "
+            f"| {_num(mean_or_none([r.get('faithfulness') for r in cr]))} "
+            f"| {_pct(mean_or_none([r['retrieval_hit'] for r in cr]))} "
+            f"| {sum(1 for r in cr if r['abstained'])}/{len(cr)} |")
+
+    # Abstention mechanics
+    L += ["", "## How it declined", "",
+          f"Of {abst['abstained_by_threshold'] + abst['abstained_by_model']} declined questions, "
+          f"{abst['abstained_by_threshold']} were stopped by the retrieval-confidence threshold "
+          f"(no synthesis, no self-critique) and {abst['abstained_by_model']} cleared the threshold "
+          f"but the model itself said the documents do not cover it. The threshold is only the "
+          f"first line of defence; the in-domain unanswerable questions are mostly caught by the "
+          f"second."]
+
+    # Failures, concretely
+    wrong = [r for r in answerable if r["correctness"] is not None and r["correctness"] < 1.0]
+    halluc = [r for r in unanswerable if not r["abstained"]]
+    unfaithful = [r for r in faith_rows if r["faithfulness"] < 1.0]
+    if wrong or halluc or unfaithful:
+        L += ["", "## Failures", "", "Every question that lost points, so the numbers above can be checked.", ""]
+    if wrong:
+        L += [f"**Incomplete or wrong answers ({len(wrong)})**", ""]
+        for r in sorted(wrong, key=lambda r: r["correctness"]):
+            why = "declined" if r["abstained"] else ("hijacked by injection" if r["hijacked"] else
+                                                     f"{r['correctness']:.0%} of key facts")
+            L.append(f"- `{r['id']}` ({why}) — {r['question']}  \n  → {_clip(r['answer'])}")
+        L.append("")
+    if halluc:
+        L += [f"**Answered although the corpus cannot ({len(halluc)})**", ""]
+        for r in halluc:
+            L.append(f"- `{r['id']}` (confidence {_num(r['confidence'])}) — {r['question']}  \n  → {_clip(r['answer'])}")
+        L.append("")
+    if unfaithful:
+        L += [f"**Judged not fully faithful ({len(unfaithful)})**", ""]
+        for r in sorted(unfaithful, key=lambda r: r["faithfulness"]):
+            L.append(f"- `{r['id']}` (faithfulness {r['faithfulness']:.2f}) — {r['question']}  \n  → {_clip(r['answer'])}")
+        L.append("")
+
+    # Threshold sweep
+    sweep = config["threshold_sweep"]
+    best = min(sweep, key=lambda s: (s["mistakes"], -s["threshold"]))
+    L += ["", "## Retrieval-confidence threshold sweep", "",
+          "What the threshold alone would do at each value. It is computed from one run, because "
+          "confidence does not depend on the threshold. 'Passed' unanswerable questions are not "
+          "necessarily answered — the model can still decline them.",
+          "", "| Threshold | Answerable refused | Unanswerable passed | Mistakes |", "| --- | --- | --- | --- |"]
+    for s in sweep:
+        mark = "  <- fewest" if s is best else ("  <- current" if abs(s["threshold"] - config["confidence_threshold"]) < 1e-9 else "")
+        L.append(f"| `{s['threshold']:.3f}` | {s['answerable_refused']}/{s['answerable_total']} "
+                 f"| {s['unanswerable_passed']}/{s['unanswerable_total']} | {s['mistakes']}{mark} |")
+
+    # Config + caveats
+    L += ["", "## Configuration", ""]
+    for key in ["date", "generator", "judge", "judge_metrics", "agentic_mode", "top_k", "chunk_size",
+                "chunk_overlap", "embedding_model", "confidence_threshold", "corpus_fingerprint"]:
+        L.append(f"- **{key}**: {config.get(key)}")
+    if models:
+        L.append(f"- **models that actually produced answers**: {', '.join(models)}")
+
+    caveats = [
+        "The corpus and questions are synthetic fixtures written for this eval. They test "
+        "behaviour — distractors, multi-hop, abstention, injection — not performance on any "
+        "real company's documents.",
+        "Answer correctness checks that required facts appear, by whole-token match. It "
+        "cannot tell a fact stated correctly from one mentioned and then contradicted.",
+        "Judged faithfulness is only as good as the judge; `evals/judge_control.py` checks it "
+        "scores fabricated answers near 0 before its scores are trusted.",
+        f"{len(rows)} questions is still small; differences of a few points between runs are noise.",
+    ]
+    if config.get("incomplete"):
+        caveats.insert(0, f"**This run is incomplete:** {config['incomplete']}")
+    L += ["", "## Caveats", ""] + [f"- {c}" for c in caveats]
+
+    with open(SCORECARD_FILE, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L) + "\n")
+    print(f"\nWrote {os.path.relpath(SCORECARD_FILE, ROOT)} and {os.path.relpath(RESULTS_FILE, ROOT)}")
+
+
+def _clip(text, n=160) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[:n - 1] + "…"
+
+
+def write_results(rows: list[dict], config: dict) -> None:
+    with open(RESULTS_FILE, "w", encoding="utf-8") as fh:
+        json.dump({"config": config, "questions": rows}, fh, indent=2, default=str, ensure_ascii=False)
+        fh.write("\n")
+
+
+# ── Entry point ──────────────────────────────────────────────────────────────
+def report_only() -> None:
+    with open(RESULTS_FILE, encoding="utf-8") as fh:
+        saved = json.load(fh)
+    render_report(saved["questions"], saved["config"])
+
+
+async def main() -> None:
+    if _flag("EVAL_REPORT_ONLY"):
+        report_only()
+        return
+
+    with open(GOLDEN_FILE, encoding="utf-8") as fh:
+        golden = json.load(fh)
+    chunks, corpus_fp = load_corpus()
+    print(f"Corpus: {len({c.metadata['source'] for c in chunks})} documents, {len(chunks)} chunks "
+          f"(fingerprint {corpus_fp}). Golden set: {len(golden)} questions.")
+    index_corpus(chunks)
+
+    fingerprint = {"corpus": corpus_fp, "generator": GENERATOR_MODEL, "threshold": CONFIDENCE_THRESHOLD,
+                   "top_k": TOP_K, "agentic": agent_mod.AGENTIC_MODE}
+    cache = load_cache(fingerprint)
+
+    incomplete = None
+    if not generate(golden, cache):
+        incomplete = "generation stopped at the daily token cap; rerun to finish."
+    elif not _flag("EVAL_SKIP_JUDGE") and not judge(golden, cache):
+        incomplete = "judging stopped at the daily token cap; rerun to finish."
+
+    rows = build_rows(golden, cache)
+    unscored = sum(1 for r in rows if not r["abstained"] and r.get("faithfulness") is None)
+    if not incomplete and unscored and "faithfulness" in JUDGE_METRICS and not _flag("EVAL_SKIP_JUDGE"):
+        incomplete = f"{unscored} substantive answers have no faithfulness score yet."
     config = {
         "date": datetime.date.today().isoformat(),
-        "golden_questions": n_golden,
-        "answered_without_error": len(per_question),
-        "embedding_model": "all-MiniLM-L6-v2 (384-dim, local)",
-        "llm": agent_mod.GROQ_MODEL,
-        "judge_llm": JUDGE_MODEL,
-        "metrics": metric_names,
+        "generator": GENERATOR_MODEL,
+        "judge": None if _flag("EVAL_SKIP_JUDGE") else JUDGE_MODEL,
+        "judge_metrics": [] if _flag("EVAL_SKIP_JUDGE") else JUDGE_METRICS,
         "agentic_mode": agent_mod.AGENTIC_MODE,
         "top_k": TOP_K,
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
+        "embedding_model": f"{EMBEDDING_MODEL} (384-dim, local)",
         "confidence_threshold": CONFIDENCE_THRESHOLD,
-        "threshold_sweep": threshold_sweep(per_question),
+        "corpus_fingerprint": corpus_fp,
+        "corpus_documents": len({c.metadata["source"] for c in chunks}),
+        "corpus_chunks": len(chunks),
+        "threshold_sweep": threshold_sweep(rows),
+        "incomplete": incomplete,
     }
-    with open(os.path.join(EVAL_DIR, "eval_results.json"), "w", encoding="utf-8") as f:
-        json.dump({"config": config, "questions": per_question}, f, indent=2, default=str)
-    render_report(per_question, config)
+    write_results(rows, config)
+    render_report(rows, config)
+    if incomplete:
+        print(f"\nINCOMPLETE: {incomplete}")
 
-
-def _mean(values):
-    values = [v for v in values if v is not None and v == v]  # drop NaN: judge failures
-    return (sum(values) / len(values) if values else float("nan")), len(values)
-
-
-def _pearson(xs, ys):
-    n = len(xs)
-    if n < 3:
-        return float("nan")
-    mx, my = sum(xs) / n, sum(ys) / n
-    sx = sum((x - mx) ** 2 for x in xs) ** 0.5
-    sy = sum((y - my) ** 2 for y in ys) ** 0.5
-    return sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / (sx * sy) if sx and sy else float("nan")
-
-
-def render_report(per_question, config):
-    """
-    Build SCORECARD.md from per-question results alone, so the report can be
-    regenerated (EVAL_REPORT_ONLY=1) without spending a single judge token.
-    """
-    import statistics
-
-    metric_names = config["metrics"]
-    answered = [q for q in per_question if not q["refused"]]
-    refused = len(per_question) - len(answered)
-
-    lines = [
-        "# RAG Evaluation Scorecard",
-        "",
-        "_Generated by `evals/run_eval.py` — do not edit by hand. "
-        "Per-question results: `eval_results.json`._",
-        "",
-        "Means are reported twice. A refusal makes no factual claim, so it scores 1.0 on",
-        "faithfulness vacuously and 0 on relevancy by construction; the answered-only",
-        "column is the one that describes answer quality.",
-        "",
-        "| Metric | Mean, all | Mean, answered only | Scored |",
-        "| --- | --- | --- | --- |",
-    ]
-    for m in metric_names:
-        all_mean, n = _mean([q.get(m) for q in per_question])
-        ans_mean, _ = _mean([q.get(m) for q in answered])
-        lines.append(f"| {m.replace('_', ' ').title()} | `{all_mean:.4f}` | `{ans_mean:.4f}` "
-                     f"| {n}/{len(per_question)} |")
-
-    lines += ["", "## Behaviour", "", f"- Refusals: {refused}/{len(per_question)}"]
-    latencies = [q["latency_ms"] for q in answered]
-    if latencies:
-        p95 = sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)]
-        lines.append(f"- Latency of answered queries: median {statistics.median(latencies) / 1000:.1f} s, "
-                     f"p95 {p95 / 1000:.1f} s (includes every LLM call; Qdrant is in-memory)")
-
-    # Interpretation that the bare numbers invite people to get wrong.
-    notes = []
-    faith = [q.get("faithfulness") for q in answered if q.get("faithfulness") == q.get("faithfulness")]
-    if faith and min(faith) >= 0.99:
-        notes.append(
-            "**Faithfulness is saturated.** Every answered question scored 1.0. That is "
-            "credible only because the same judge was shown to score fabricated answers "
-            "0.0 (`evals/judge_control.py`), but a ceiling score means this set is too easy "
-            "to discriminate: these are single-fact lookups over a corpus small enough "
-            "that every query retrieves all of it. It shows the system does not "
-            "hallucinate on easy questions, and nothing about hard ones."
-        )
-    if "answer_relevancy" in metric_names and answered:
-        words = [len(str(q["answer"]).split()) for q in answered]
-        rel = [q.get("answer_relevancy") or 0.0 for q in answered]
-        r = _pearson(words, rel)
-        short = [q for q in answered if len(str(q["answer"]).split()) <= 4]
-        longer = [q for q in answered if len(str(q["answer"]).split()) > 4]
-        if short and longer and r == r and r > 0.4:
-            s_mean, _ = _mean([q.get("answer_relevancy") for q in short])
-            l_mean, _ = _mean([q.get("answer_relevancy") for q in longer])
-            notes.append(
-                f"**Answer relevancy is mostly measuring length here.** Its correlation with "
-                f"answer word count is {r:+.2f}: answers of four words or fewer average "
-                f"{s_mean:.3f}, longer ones {l_mean:.3f}. RAGAS scores relevancy by "
-                f"regenerating the question from the answer, which a correct one-word "
-                f"answer cannot do. Read it as a verbosity signal, not a quality one."
-            )
-    if notes:
-        lines += ["", "## Reading these numbers", ""] + [f"- {n}" for n in notes]
-
-    sweep = config["threshold_sweep"]
-    best = min(sweep, key=lambda row: (row["mistakes"], -row["threshold"]))
-    lines += [
-        "", "## Refusal threshold sweep", "",
-        "Retrieval confidence does not depend on the threshold, so this whole table "
-        "comes from the single run above. 'Wrongly refused' is an answerable question "
-        "the threshold would reject; 'wrongly answered' is an unanswerable one it "
-        "would let through.",
-        "",
-        "| Threshold | Wrongly refused | Wrongly answered | Total mistakes |",
-        "| --- | --- | --- | --- |",
-    ]
-    for row in sweep:
-        marker = "  <- fewest mistakes" if row is best else ""
-        lines.append(
-            f"| `{row['threshold']:.2f}` | {row['answerable_refused']}/{row['answerable_total']} "
-            f"| {row['unanswerable_answered']}/{row['unanswerable_total']} | {row['mistakes']}{marker} |"
-        )
-
-    lines += ["", "## Configuration", ""]
-    lines += [f"- **{key}**: {value}" for key, value in config.items() if key != "threshold_sweep"]
-
-    caveats = ["Small golden set; treat differences under ~0.05 as noise."]
-    gen_family = str(config["llm"]).split("/")[0]
-    judge_family = str(config["judge_llm"]).split("/")[0]
-    if gen_family == judge_family:
-        caveats.append(f"The judge ({config['judge_llm']}) is the same model family as the "
-                       f"generator ({config['llm']}), which can inflate scores.")
-    else:
-        caveats.append(f"The judge ({config['judge_llm']}) is a different model family from the "
-                       f"generator ({config['llm']}), so it is not grading its own output.")
-    caveats.append("The sweep's best threshold is fitted on this set. With few negative examples "
-                   "it is a starting point, not a calibration; add unanswerable questions before "
-                   "trusting a precise value.")
-    lines += ["", "## Caveats", ""] + [f"- {c}" for c in caveats]
-
-    with open(os.path.join(EVAL_DIR, "SCORECARD.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"Wrote SCORECARD.md and eval_results.json to {EVAL_DIR}")
-
-
-def report_only():
-    """Rebuild SCORECARD.md from the last eval_results.json; no model calls."""
-    with open(os.path.join(EVAL_DIR, "eval_results.json"), encoding="utf-8") as f:
-        saved = json.load(f)
-    config, per_question = saved["config"], saved["questions"]
-    config.setdefault("metrics", [m for m in ("faithfulness", "answer_relevancy",
-                                              "context_precision", "context_recall")
-                                  if m in per_question[0]])
-    config["judge_llm"] = str(config.get("judge_llm", "")).replace(" (Groq)", "")
-    render_report(per_question, config)
-
-
-async def main():
-    if os.getenv("EVAL_REPORT_ONLY", "").lower() in ("1", "true", "yes"):
-        report_only()
-        return
-    print("==================================================")
-    print("        ARISHEM RAG PIPELINE EVALUATION           ")
-    print("==================================================")
-    print("Loading documents and setting up local Qdrant...")
-    docs = load_documents()
-    setup_qdrant(docs)
-
-    golden_file = os.path.join(os.path.dirname(__file__), "golden_set.json")
-    with open(golden_file) as f:
-        golden_set = json.load(f)
-
-    print(f"Loaded {len(golden_set)} questions from golden set.")
-
-    data_samples = {
-        "question": [],
-        "answer": [],
-        "contexts": [],
-        "ground_truth": [],
-        "reference": []  # for compatibility with ragas 0.2.x
-    }
-
-    from langchain_groq import ChatGroq
-
-    print("Importing ragas...")
-    from ragas import evaluate
-    from ragas.metrics import (
-        answer_relevancy,
-        context_precision,
-        context_recall,
-        faithfulness,
-    )
-
-    _metrics = {
-        "faithfulness": faithfulness,
-        "answer_relevancy": answer_relevancy,
-        "context_precision": context_precision,
-        "context_recall": context_recall,
-    }
-    unknown = [m for m in EVAL_METRICS if m not in _metrics]
-    if unknown:
-        raise SystemExit(f"Unknown EVAL_METRICS {unknown}; choose from {sorted(_metrics)}")
-    chosen_metrics = [_metrics[m] for m in EVAL_METRICS]
-    print(f"Metrics: {', '.join(EVAL_METRICS)}")
-    try:
-        from ragas.embeddings import LangchainEmbeddingsWrapper
-        from ragas.llms import LangchainLLMWrapper
-        wrapper_available = True
-    except ImportError:
-        wrapper_available = False
-
-    # The judge should be at least as strong as the generator, and must be a model
-    # Groq still serves: the previous id here was retired, which is one of the two
-    # reasons this harness could not run.
-    eval_llm = ChatGroq(model=JUDGE_MODEL, temperature=0, timeout=60, max_retries=5)
-
-    if wrapper_available:
-        ragas_llm = LangchainLLMWrapper(eval_llm)
-        ragas_embeddings = LangchainEmbeddingsWrapper(embedding_mod.get_embeddings())
-    else:
-        ragas_llm = eval_llm
-        ragas_embeddings = embedding_mod.get_embeddings()
-
-    if REUSE_ANSWERS:
-        if not os.path.exists(ANSWERS_CACHE):
-            raise SystemExit(f"EVAL_REUSE_ANSWERS is set but {ANSWERS_CACHE} is missing.")
-        with open(ANSWERS_CACHE, encoding="utf-8") as fh:
-            cached = json.load(fh)
-        per_question = cached["questions"]
-        data_samples = cached["data_samples"]
-        print(f"Reusing {len(per_question)} cached answers; no generation calls.")
-    else:
-        print("Running queries through the agent pipeline...")
-        per_question = []
-        for item in golden_set:
-            question = item["question"]
-            gt = item["ground_truth"]
-
-            try:
-                started = time.perf_counter()
-                res = agent_mod.query(question=question, workspace_id=1, top_k=TOP_K)
-                latency_ms = int((time.perf_counter() - started) * 1000)
-                answer = res.get("answer", "")
-
-                # The exact chunks the judge will score the answer against.
-                vs = mock_get_vector_store()
-                from qdrant_client.http import models as qdrant_models
-                filter_ = qdrant_models.Filter(must=[
-                    qdrant_models.FieldCondition(key="metadata.workspace_id", match=qdrant_models.MatchValue(value=1))
-                ])
-                docs_res = vs.similarity_search(question, k=TOP_K, filter=filter_)
-                contexts = [d.page_content for d in docs_res]
-
-                data_samples["question"].append(question)
-                data_samples["answer"].append(answer)
-                data_samples["contexts"].append(contexts)
-                data_samples["ground_truth"].append(gt)
-                data_samples["reference"].append(gt)  # ragas 0.1.x vs 0.2.x
-                per_question.append({
-                    "question": question,
-                    "ground_truth": gt,
-                    "answerable": is_answerable(item),
-                    "answer": answer,
-                    "confidence": res.get("confidence"),
-                    "refused": bool(res.get("refused", not res.get("sources"))),
-                    "latency_ms": latency_ms,
-                    "usage": res.get("usage"),
-                })
-
-            except Exception as e:
-                print(f"Error querying '{question}': {e}")
-                continue
-
-            time.sleep(2)  # stay under Groq's per-minute limits
-
-        with open(ANSWERS_CACHE, "w", encoding="utf-8") as fh:
-            json.dump({"data_samples": data_samples, "questions": per_question},
-                      fh, indent=2, default=str)
-        print(f"Cached answers to {ANSWERS_CACHE} — rescore with EVAL_REUSE_ANSWERS=1.")
-
-    from datasets import Dataset
-    dataset = Dataset.from_dict(data_samples)
-
-    print("Running ragas evaluation... (this will take a few minutes)")
-    try:
-        # ragas fans out one request per metric per row by default, which a free
-        # Groq tier answers with a wall of 429s. Four metrics over 30 questions is
-        # only ~120 judge calls, so serialising them costs minutes and actually
-        # finishes, where the default concurrency thrashes on retries.
-        from ragas.run_config import RunConfig
-
-        results = evaluate(
-            dataset,
-            metrics=chosen_metrics,
-            llm=ragas_llm,
-            embeddings=ragas_embeddings,
-            raise_exceptions=False,
-            run_config=RunConfig(max_workers=int(os.getenv("EVAL_MAX_WORKERS", "2")), timeout=180),
-        )
-
-        print("Evaluation complete!")
-        print(results)
-
-        write_outputs(results, per_question, n_golden=len(golden_set))
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"Ragas evaluation failed: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
