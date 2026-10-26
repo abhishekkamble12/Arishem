@@ -15,24 +15,29 @@ export const ConfidenceBar: React.FC<ConfidenceBarProps> = ({
 }) => {
   const percentage = Math.min(100, Math.max(0, Math.round(score * 100)));
 
-  // Red <0.35, Yellow 0.35–0.60, Green >0.60
-  let label = 'Low Match';
-  let barColor = 'bg-rose-500';
-  let textColor = 'text-rose-400';
-  let bgColor = 'bg-rose-500/10 border-rose-500/20';
+  // The score is the mean cosine similarity of the retrieved chunks, not a
+  // probability. Bands come from the evaluation's answerable questions
+  // (evals/golden_set.json, 53 questions): Q1 0.31, median 0.37, Q3 0.45. The old
+  // bands (red below 0.35) dated from a retired embedding model and labelled 20
+  // of those 53 correct answers "Low Match". Weak is amber, not red: anything
+  // shown here has already cleared the refusal threshold.
+  let label = 'Weak match';
+  let barColor = 'bg-amber-500';
+  let textColor = 'text-amber-400';
+  let bgColor = 'bg-amber-500/10 border-amber-500/20';
   let Icon = AlertCircle;
 
-  if (score >= 0.60) {
-    label = 'Strong Match';
+  if (score >= 0.45) {
+    label = 'Strong match';
     barColor = 'bg-emerald-400';
     textColor = 'text-emerald-400';
     bgColor = 'bg-emerald-500/10 border-emerald-500/20';
     Icon = ShieldCheck;
-  } else if (score >= 0.35) {
-    label = 'Moderate Match';
-    barColor = 'bg-amber-400';
-    textColor = 'text-amber-400';
-    bgColor = 'bg-amber-500/10 border-amber-500/20';
+  } else if (score >= 0.30) {
+    label = 'Typical match';
+    barColor = 'bg-brand-400';
+    textColor = 'text-brand-300';
+    bgColor = 'bg-brand-500/10 border-brand-500/20';
     Icon = CheckCircle2;
   }
 

@@ -7,3 +7,12 @@ export const FEATURES = {
   // id behind it, and a configured client id with no button.
   googleAuth: Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID),
 } as const;
+
+// The models the backend is configured with (GROQ_MODEL_ID and friends in
+// Services/agent.py). Display labels only, defined once: when each page spelled
+// out the model itself, a retired one went stale in four places at once.
+export const MODELS = {
+  generator: 'openai/gpt-oss-20b',
+  fallback: 'openai/gpt-oss-120b',
+  embeddings: 'all-MiniLM-L6-v2',
+} as const;

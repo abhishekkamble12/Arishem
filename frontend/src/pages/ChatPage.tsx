@@ -10,6 +10,7 @@ import {
   MessageSquare, Send, Sparkles, Loader2, 
   ShieldAlert, BookOpen
 } from 'lucide-react';
+import { MODELS } from '../config';
 
 export const ChatPage: React.FC = () => {
   const {
@@ -76,7 +77,7 @@ export const ChatPage: React.FC = () => {
             <div>
               <h2 className="font-bold text-white text-sm">Arishem RAG Session</h2>
               <p className="text-[10px] text-dark-500 font-mono">
-                Model: Groq Llama 3.3 70B · Context window: 128k
+                Model: Groq {MODELS.generator} · answers cite their sources
               </p>
             </div>
           </div>
@@ -135,7 +136,7 @@ export const ChatPage: React.FC = () => {
                           <ConfidenceBar score={msg.confidence} />
                           {msg.llm_confidence !== undefined && (
                             <span className="text-[10px] text-dark-500 font-mono">
-                              LLM Verification: {Math.round(msg.llm_confidence * 100)}%
+                              Model's own confidence: {Math.round(msg.llm_confidence * 100)}%
                             </span>
                           )}
                         </div>

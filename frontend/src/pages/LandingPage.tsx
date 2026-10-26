@@ -6,6 +6,7 @@ import {
     ChevronRight, ArrowRight, Star, Lock, RefreshCw,
     MessageSquare, AlertTriangle, CheckCircle
 } from 'lucide-react';
+import { MODELS } from '../config';
 
 // ── Animated counter hook ──────────────────────────────────────────────────
 function useCounter(target: number, duration = 1800, start = false) {
@@ -151,7 +152,7 @@ export const LandingPage: React.FC = () => {
                 {/* Badge */}
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs font-semibold mb-8 animate-fade-in">
                     <Sparkles className="w-3.5 h-3.5" />
-                    Powered by Groq Llama 3.3 70B · Qdrant · Whisper
+                    Groq {MODELS.generator} · Qdrant · {MODELS.embeddings}
                 </div>
 
                 {/* Headline */}
@@ -164,7 +165,7 @@ export const LandingPage: React.FC = () => {
                 </h1>
 
                 <p className="text-lg md:text-xl text-dark-400 max-w-2xl mx-auto leading-relaxed mb-10 animate-slide-up" style={{ animationDelay: '80ms' }}>
-                    Arishem is an enterprise-grade Retrieval-Augmented Generation platform. Upload PDFs, DOCX, videos, and audio — then ask anything. Get cited, confidence-scored answers in seconds.
+                    Arishem is a multi-tenant Retrieval-Augmented Generation platform. Upload PDFs, Word documents, text and Markdown, then ask questions. Answers cite the passage they came from, and questions the documents cannot answer are refused instead of guessed.
                 </p>
 
                 {/* CTAs */}
@@ -189,8 +190,8 @@ export const LandingPage: React.FC = () => {
                     {[
                         { icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />, text: 'JWT-secured API' },
                         { icon: <Lock className="w-3.5 h-3.5 text-blue-400" />, text: 'Role-based access control' },
-                        { icon: <Zap className="w-3.5 h-3.5 text-amber-400" />, text: 'Sub-3s query latency' },
-                        { icon: <Star className="w-3.5 h-3.5 text-brand-400" />, text: '0.92 faithfulness score' },
+                        { icon: <Zap className="w-3.5 h-3.5 text-amber-400" />, text: '~2.5 s median answer' },
+                        { icon: <Star className="w-3.5 h-3.5 text-brand-400" />, text: 'Cited answers or a refusal' },
                     ].map(({ icon, text }) => (
                         <div key={text} className="flex items-center gap-1.5 font-medium">
                             {icon}
@@ -238,8 +239,9 @@ export const LandingPage: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2 mt-1 px-1">
-                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">LLM: 94%</span>
-                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">Retrieval: 88%</span>
+                                    {/* 0.70 is what a real in-domain answer scored on the deployed stack
+                                        (docs/DEPLOYMENT_VERIFICATION.md), shown as the chat shows it. */}
+                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">0.70 · Strong match</span>
                                     <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold flex items-center gap-1">
                                         <ShieldCheck className="w-2.5 h-2.5" /> PASS
                                     </span>
@@ -256,7 +258,7 @@ export const LandingPage: React.FC = () => {
                             {[
                                 { name: 'Data_Governance_SOP_v2.pdf', type: 'pdf', status: 'SUCCESS', chunks: 42 },
                                 { name: 'Q3_Compliance_Report.docx', type: 'docx', status: 'SUCCESS', chunks: 28 },
-                                { name: 'Team_Meeting_Oct.mp4', type: 'mp4', status: 'PROCESSING', chunks: 0 },
+                                { name: 'Incident_Runbook.md', type: 'md', status: 'PROCESSING', chunks: 0 },
                             ].map((f) => (
                                 <div key={f.name} className="glass-panel rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2 truncate">
@@ -276,10 +278,11 @@ export const LandingPage: React.FC = () => {
             <section id="stats" ref={statsRef} className="relative z-10 py-20 border-y border-dark-800/50">
                 <div className="max-w-5xl mx-auto px-6">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-12">
-                        <StatCard value={92} suffix="%" label="Faithfulness Score (RAGAS)" start={statsInView} />
-                        <StatCard value={88} suffix="%" label="Answer Relevancy" start={statsInView} />
-                        <StatCard value={3} suffix="s" label="Avg. Query Latency" start={statsInView} />
-                        <StatCard value={12} suffix="+" label="File Formats Supported" start={statsInView} />
+                        {/* Each figure traces to a recorded run: docs/DEPLOYMENT_VERIFICATION.md and the README. */}
+                        <StatCard value={32} suffix="/32" label="Checks passed on a live AWS deployment" start={statsInView} />
+                        <StatCard value={52} suffix="/53" label="Hard-suite questions with the right document retrieved" start={statsInView} />
+                        <StatCard value={19} suffix="" label="Unanswerable questions in the eval, to test refusals" start={statsInView} />
+                        <StatCard value={4} suffix="" label="Document types: PDF, Word, text, Markdown" start={statsInView} />
                     </div>
                 </div>
             </section>
@@ -314,8 +317,7 @@ export const LandingPage: React.FC = () => {
                         icon={<ShieldCheck className="w-5 h-5" />}
                         title="Self-Critique & Fact Check"
                         description="Built-in LLM self-critique loop evaluates faithfulness and flags unsupported claims with PASS / PARTIAL / FAIL verdicts."
-                        badge="Unique"
-                        delay={120}
+                                                delay={120}
                     />
                     <FeatureCard
                         icon={<Upload className="w-5 h-5" />}
@@ -377,9 +379,9 @@ export const LandingPage: React.FC = () => {
                             <div className="space-y-5">
                                 <PipelineStep step={1} label="Upload" sublabel="S3 direct upload or S3 key reference" color="bg-brand-500/10 text-brand-400" icon={<Upload className="w-4 h-4" />} />
                                 <div className="ml-5 h-4 w-px bg-dark-700" />
-                                <PipelineStep step={2} label="Extract & Chunk" sublabel="PyMuPDF, python-docx, python-pptx, Whisper" color="bg-blue-500/10 text-blue-400" icon={<FileText className="w-4 h-4" />} />
+                                <PipelineStep step={2} label="Extract & Chunk" sublabel="PyMuPDF, docx2txt, plain text and Markdown" color="bg-blue-500/10 text-blue-400" icon={<FileText className="w-4 h-4" />} />
                                 <div className="ml-5 h-4 w-px bg-dark-700" />
-                                <PipelineStep step={3} label="Embed" sublabel="OpenAI / Bedrock embeddings → Qdrant vectors" color="bg-violet-500/10 text-violet-400" icon={<Brain className="w-4 h-4" />} />
+                                <PipelineStep step={3} label="Embed" sublabel={`${MODELS.embeddings} on the server → Qdrant vectors`} color="bg-violet-500/10 text-violet-400" icon={<Brain className="w-4 h-4" />} />
                                 <div className="ml-5 h-4 w-px bg-dark-700" />
                                 <PipelineStep step={4} label="Index & Confirm" sublabel="DB record updated: SUCCESS + chunk count" color="bg-emerald-500/10 text-emerald-400" icon={<CheckCircle className="w-4 h-4" />} />
                             </div>
@@ -396,7 +398,7 @@ export const LandingPage: React.FC = () => {
                                 <div className="ml-5 h-4 w-px bg-dark-700" />
                                 <PipelineStep step={2} label="Retrieve" sublabel="Qdrant semantic search across workspace chunks" color="bg-blue-500/10 text-blue-400" icon={<Search className="w-4 h-4" />} />
                                 <div className="ml-5 h-4 w-px bg-dark-700" />
-                                <PipelineStep step={3} label="Synthesise" sublabel="Groq Llama 3.3 70B generates grounded answer" color="bg-brand-500/10 text-brand-400" icon={<Brain className="w-4 h-4" />} />
+                                <PipelineStep step={3} label="Synthesise" sublabel={`Groq ${MODELS.generator} writes a grounded, cited answer`} color="bg-brand-500/10 text-brand-400" icon={<Brain className="w-4 h-4" />} />
                                 <div className="ml-5 h-4 w-px bg-dark-700" />
                                 <PipelineStep step={4} label="Self-Critique" sublabel="Fact-check loop → PASS / PARTIAL / FAIL verdict" color="bg-emerald-500/10 text-emerald-400" icon={<ShieldCheck className="w-4 h-4" />} />
                             </div>

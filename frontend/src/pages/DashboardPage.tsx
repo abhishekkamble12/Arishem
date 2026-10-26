@@ -6,6 +6,7 @@ import {
   MessageSquare, FileText, Upload, BarChart3, Settings, 
   Clock, ArrowRight, Database, ChevronRight, FileCheck
 } from 'lucide-react';
+import { MODELS } from '../config';
 
 export const DashboardPage: React.FC = () => {
   const { user, activeWorkspaceId } = useAuthStore();
@@ -126,7 +127,7 @@ export const DashboardPage: React.FC = () => {
         <div className="glass-panel p-5 rounded-2xl border border-dark-800/80 flex items-center justify-between">
           <div>
             <span className="text-[10px] uppercase font-bold tracking-wider text-dark-500">Active RAG Engine</span>
-            <span className="text-base font-extrabold text-white block mt-1">Llama 3.3 70B</span>
+            <span className="text-base font-extrabold text-white block mt-1 font-mono">{MODELS.generator}</span>
             <span className="text-[10px] font-mono text-brand-400 mt-0.5 block">Self-Critique Enabled</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center text-brand-400 border border-brand-500/15">
@@ -139,7 +140,7 @@ export const DashboardPage: React.FC = () => {
           <div>
             <span className="text-[10px] uppercase font-bold tracking-wider text-dark-500">Total Documents</span>
             <span className="text-base font-extrabold text-white block mt-1 font-mono">{files.length} Ingested</span>
-            <span className="text-[10px] text-dark-400 mt-0.5 block">Across S3 & Youtube</span>
+            <span className="text-[10px] text-dark-400 mt-0.5 block">In this workspace</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center text-brand-400 border border-brand-500/15">
             <FileText className="w-5 h-5" />
@@ -149,9 +150,11 @@ export const DashboardPage: React.FC = () => {
         {/* Stat 3 */}
         <div className="glass-panel p-5 rounded-2xl border border-dark-800/80 flex items-center justify-between">
           <div>
-            <span className="text-[10px] uppercase font-bold tracking-wider text-dark-500">Average Latency</span>
-            <span className="text-base font-extrabold text-white block mt-1 font-mono">1.48s</span>
-            <span className="text-[10px] text-emerald-400 mt-0.5 block">● Healthy (AWS Bedrock)</span>
+            <span className="text-[10px] uppercase font-bold tracking-wider text-dark-500">Your role here</span>
+            <span className="text-base font-extrabold text-white block mt-1 capitalize">{role}</span>
+            <span className="text-[10px] text-dark-400 mt-0.5 block">
+              {role === 'viewer' ? 'Can ask questions' : role === 'editor' ? 'Can upload and delete documents' : 'Can also manage members'}
+            </span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center text-brand-400 border border-brand-500/15">
             <Clock className="w-5 h-5" />
