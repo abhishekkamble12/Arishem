@@ -45,6 +45,31 @@ _splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", ". ", " ", ""],
 )
 
+
+def normalise_newlines(text: str) -> str:
+    """
+    Fold Windows and old-Mac line endings to "\\n".
+
+    The splitter is sensitive to them: "\\n\\n" never occurs inside "\\r\\n\\r\\n",
+    so CRLF text falls through to splitting on single newlines and gets different
+    boundaries. None of the current loaders hand it CRLF — TextLoader reads in
+    Python's text mode, which already converts line endings — so this is cheap
+    insurance against a future loader that reads bytes, not a fix for a bug that
+    was ever observed.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def split_pages(pages: list[Document]) -> list[Document]:
+    """
+    The one place text becomes chunks. The evaluation harness calls this rather
+    than copying its settings, so the eval cannot measure a chunker that does not
+    ship.
+    """
+    for page in pages:
+        page.page_content = normalise_newlines(page.page_content)
+    return _splitter.split_documents(pages)
+
 # Map extension → LangChain loader class (documents only)
 _LOADER_MAP = {
     ".pdf":  PyMuPDFLoader,
@@ -106,7 +131,7 @@ def extract_and_chunk(bucket_name: str, s3_key: str) -> list[Document]:
     if ext in SUPPORTED_MEDIA_EXTENSIONS:
         logger.info("Routing %s to AWS Transcribe", s3_key)
         transcript_doc = transcribe_media(bucket_name, s3_key)
-        chunks = _splitter.split_documents([transcript_doc])
+        chunks = split_pages([transcript_doc])
         logger.info("Produced %d chunks from transcript of '%s'", len(chunks), s3_key)
         return chunks
 
@@ -127,7 +152,7 @@ def extract_and_chunk(bucket_name: str, s3_key: str) -> list[Document]:
             page.metadata.setdefault("source", s3_key)
             page.metadata.setdefault("bucket", bucket_name)
 
-        chunks = _splitter.split_documents(pages)
+        chunks = split_pages(pages)
         logger.info("Produced %d chunks from %d page(s)/slide(s)", len(chunks), len(pages))
         return chunks
 

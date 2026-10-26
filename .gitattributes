@@ -1,0 +1,6 @@
+# Keep the evaluation corpus byte-identical across platforms. The harness already
+# fingerprints normalised text, so this is belt and braces; *.pdf must stay binary
+# or git would rewrite its bytes and corrupt it.
+pcaps/*.md   text eol=lf
+pcaps/*.txt  text eol=lf
+*.pdf        binary
