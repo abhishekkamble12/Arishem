@@ -25,7 +25,7 @@ measured, and this README does not claim it.
 | Faithfulness (RAGAS), easy suite | **1.00** on 28 answered questions — saturated, which is why the hard suite exists |
 | Refusal accuracy, easy suite | **30/30** — but with only 2 unanswerable questions; the hard suite has 19 |
 | Tests | 98 backend + 21 for the eval's scoring rules, all offline; **68% line coverage** of application code (tests and migrations excluded) |
-| Query latency, deployed | **16.0 s** per answered query in agentic mode (3 sequential Groq calls) |
+| Query latency | **median 2.46 s, worst 5.37 s** over six queries in the production container, measured while Groq was rate-limiting the primary model; ~2.1 s of it is the three Groq calls |
 | Tokens per answered query | **1,041 in + 449 out** on the deployed system |
 | Deployment cost | **~\$14.69/month** on AWS, from live Pricing API rates — see [docs/DEPLOY.md](docs/DEPLOY.md) |
 
@@ -358,15 +358,22 @@ The template is validated (`validate-template` and `cfn-lint`, no findings) but
   their confidence overlaps with answerable ones. It relies on the model declining,
   and it is a mean over the top-k, which makes it corpus-dependent.
 - **No prompt-injection guard.** A document can carry instructions into the prompt.
-- 16 s per answer is slow for a chat interface. The cause is agentic mode's three
-  sequential LLM calls; single-pass mode is roughly a third of that, with its
-  quality cost not yet measured.
+  The hard evaluation suite contains such a document; its result is not in yet.
+- **Latency was 16 s on the first deployed query, and the cause was not the
+  model.** The three Groq calls take ~2 s together. The rest was a cold start
+  (torch and the embedding model loading on the first request: 14–22 s) and, under
+  rate limiting, the primary model sleeping up to 60 s on Groq's retry-after before
+  the fallback ran (66 s and 83 s measured). Workers now warm up at boot, and the
+  primary fails over instead of waiting: median 2.46 s, worst 5.37 s, under the same
+  throttling. Single-pass mode would cut the remaining ~2 s further, but its effect on
+  answer quality is unmeasured.
 - Drift checking runs inside the query request. It should move to a Celery task.
 - Retrieval is dense-only. Hybrid BM25 + vector search or a reranker would help
   keyword-heavy questions.
 - No load testing, so there are no throughput numbers.
-- One instance with no backups: a reboot is downtime, and the Postgres and Qdrant
-  volumes have no snapshot schedule.
+- One instance, by design: a reboot is downtime. AWS restarts it on a host failure,
+  and the stack takes daily volume snapshots (7 kept), but the snapshot schedule has
+  been validated as a template and not yet observed running on a deployed stack.
 
 ## License
 

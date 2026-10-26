@@ -127,10 +127,16 @@ real network latency, a real S3 round trip and the instance's own CPU.
 | Tokens, one answered query | **1,041 in + 449 out** |
 | Tokens, one refused query | 240 in + 66 out (the difference between the two rows above) |
 
-16 seconds is slow for a chat interface, and the cause is agentic mode making
-three sequential LLM calls. Setting `RAG_AGENTIC_MODE=false` trades the
-decomposition and self-critique steps for roughly a third of the latency. That
-trade has not been measured for answer quality yet.
+**Correction, added later.** This section originally blamed the 16 seconds on
+agentic mode's three sequential LLM calls. Measuring it properly showed otherwise:
+the three Groq calls take about 2 s together. This was the first query on a freshly
+booted instance, so it also paid for importing torch and loading the embedding
+model, which the workers did lazily on their first request. Separately, under rate
+limiting, the client slept on Groq's retry-after for up to 60 s before trying the
+fallback model. Both are fixed: workers warm up at boot, and the primary fails over
+immediately. Measured afterwards in the production container, while Groq was
+throttling the primary: median 2.46 s, worst 5.37 s. The 16.0 s above is left as
+recorded, because that is what this run measured.
 
 ## Bugs this exercise found
 
