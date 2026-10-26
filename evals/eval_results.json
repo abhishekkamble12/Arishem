@@ -1,0 +1,611 @@
+{
+  "config": {
+    "date": "2026-10-26",
+    "golden_questions": 30,
+    "answered_without_error": 30,
+    "embedding_model": "all-MiniLM-L6-v2 (384-dim, local)",
+    "llm": "openai/gpt-oss-20b",
+    "judge_llm": "qwen/qwen3.8-27b (Groq)",
+    "agentic_mode": true,
+    "top_k": 5,
+    "chunk_size": 800,
+    "chunk_overlap": 150,
+    "confidence_threshold": 0.065,
+    "threshold_sweep": [
+      {
+        "threshold": 0.02,
+        "answerable_refused": 0,
+        "answerable_total": 28,
+        "unanswerable_answered": 1,
+        "unanswerable_total": 2,
+        "mistakes": 1
+      },
+      {
+        "threshold": 0.04,
+        "answerable_refused": 0,
+        "answerable_total": 28,
+        "unanswerable_answered": 1,
+        "unanswerable_total": 2,
+        "mistakes": 1
+      },
+      {
+        "threshold": 0.06,
+        "answerable_refused": 0,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 0
+      },
+      {
+        "threshold": 0.08,
+        "answerable_refused": 1,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 1
+      },
+      {
+        "threshold": 0.1,
+        "answerable_refused": 2,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 2
+      },
+      {
+        "threshold": 0.12,
+        "answerable_refused": 2,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 2
+      },
+      {
+        "threshold": 0.14,
+        "answerable_refused": 4,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 4
+      },
+      {
+        "threshold": 0.16,
+        "answerable_refused": 6,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 6
+      },
+      {
+        "threshold": 0.18,
+        "answerable_refused": 9,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 9
+      },
+      {
+        "threshold": 0.2,
+        "answerable_refused": 14,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 14
+      },
+      {
+        "threshold": 0.25,
+        "answerable_refused": 22,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 22
+      },
+      {
+        "threshold": 0.3,
+        "answerable_refused": 24,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 24
+      },
+      {
+        "threshold": 0.35,
+        "answerable_refused": 27,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 27
+      },
+      {
+        "threshold": 0.4,
+        "answerable_refused": 28,
+        "answerable_total": 28,
+        "unanswerable_answered": 0,
+        "unanswerable_total": 2,
+        "mistakes": 28
+      }
+    ]
+  },
+  "questions": [
+    {
+      "question": "What is the retention period for API prediction logs according to SOP-104?",
+      "ground_truth": "API prediction logs must be retained for exactly 90 days.",
+      "answerable": true,
+      "answer": "The retention period for API prediction logs is 90 days.",
+      "confidence": 0.30572828253020984,
+      "refused": false,
+      "latency_ms": 3458,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1977,
+        "completion_tokens": 392
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9265123901397856
+    },
+    {
+      "question": "Who has the authority to request an extension of the data retention period?",
+      "ground_truth": "The compliance officer (compliance@arishem.com) can request an extension.",
+      "answerable": true,
+      "answer": "The compliance officer (compliance@arishem.com) has the authority to request an extension of the data retention period.",
+      "confidence": 0.19043883624907632,
+      "refused": false,
+      "latency_ms": 2356,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1987,
+        "completion_tokens": 448
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999999994
+    },
+    {
+      "question": "What is the maximum duration for a data retention extension under SOP-104?",
+      "ground_truth": "The maximum extension is up to 180 days.",
+      "answerable": true,
+      "answer": "The maximum duration for a data retention extension under SOP-104 is 180 days.",
+      "confidence": 0.2496671393174082,
+      "refused": false,
+      "latency_ms": 5246,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1982,
+        "completion_tokens": 541
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999999996
+    },
+    {
+      "question": "How often are external audits conducted according to SOP-104?",
+      "ground_truth": "External audits are conducted quarterly.",
+      "answerable": true,
+      "answer": "External audits are conducted quarterly.",
+      "confidence": 0.2129999504930731,
+      "refused": false,
+      "latency_ms": 3579,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1965,
+        "completion_tokens": 316
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8769740559168441
+    },
+    {
+      "question": "Who conducts the external audits mentioned in SOP-104?",
+      "ground_truth": "The internal auditing team conducts the external audits.",
+      "answerable": true,
+      "answer": "The external audits are conducted quarterly by the internal auditing team.",
+      "confidence": 0.1757311207868853,
+      "refused": false,
+      "latency_ms": 4486,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1969,
+        "completion_tokens": 401
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7199044979005339
+    },
+    {
+      "question": "When did the SOP-104 Data Retention Policy become effective?",
+      "ground_truth": "It became effective on January 1, 2026.",
+      "answerable": true,
+      "answer": "January 1, 2026",
+      "confidence": 0.193948256444413,
+      "refused": false,
+      "latency_ms": 13692,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1969,
+        "completion_tokens": 384
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.13187879148777415
+    },
+    {
+      "question": "How many days of paid time off do full-time employees get?",
+      "ground_truth": "Full-time employees are entitled to 20 days of paid time off per calendar year.",
+      "answerable": true,
+      "answer": "Full\u2011time employees receive 20 days of paid time off per calendar year.",
+      "confidence": 0.19569955160258948,
+      "refused": false,
+      "latency_ms": 16463,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1977,
+        "completion_tokens": 567
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9063475480258026
+    },
+    {
+      "question": "How many PTO days can be carried over to the following year?",
+      "ground_truth": "Up to 5 days of PTO can be carried over to the next year.",
+      "answerable": true,
+      "answer": "Up to 5 days",
+      "confidence": 0.2254308470696097,
+      "refused": false,
+      "latency_ms": 25406,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 2861,
+        "completion_tokens": 908
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.30400251425690505
+    },
+    {
+      "question": "What is the requirement for consecutive sick leaves exceeding 3 days?",
+      "ground_truth": "A doctor's note is required.",
+      "answerable": true,
+      "answer": "A doctor's note is required for consecutive sick leaves exceeding 3 days.",
+      "confidence": 0.17942426468844663,
+      "refused": false,
+      "latency_ms": 19084,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1975,
+        "completion_tokens": 418
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8057381200650008
+    },
+    {
+      "question": "How many days of sick leave are provided annually?",
+      "ground_truth": "Employees are provided 10 days of paid sick leave annually.",
+      "answerable": true,
+      "answer": "10 days",
+      "confidence": 0.19562116304111168,
+      "refused": false,
+      "latency_ms": 12372,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1958,
+        "completion_tokens": 628
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.3486189374741237
+    },
+    {
+      "question": "What is the duration of Arishem's parental leave?",
+      "ground_truth": "Arishem offers 12 weeks of fully paid parental leave.",
+      "answerable": true,
+      "answer": "12 weeks",
+      "confidence": 0.37609978689694146,
+      "refused": false,
+      "latency_ms": 12418,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1962,
+        "completion_tokens": 663
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.3174034887552431
+    },
+    {
+      "question": "Under what circumstances is parental leave granted?",
+      "ground_truth": "For the birth or adoption of a child.",
+      "answerable": true,
+      "answer": "Parental leave is granted for the birth or adoption of a child.",
+      "confidence": 0.12981469046928673,
+      "refused": false,
+      "latency_ms": 18395,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1965,
+        "completion_tokens": 383
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999999044
+    },
+    {
+      "question": "How much bereavement leave is granted for the death of an immediate family member?",
+      "ground_truth": "Up to 3 days of paid leave is granted.",
+      "answerable": true,
+      "answer": "Up to 3 days of paid leave.",
+      "confidence": 0.13925113763109787,
+      "refused": false,
+      "latency_ms": 9731,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1978,
+        "completion_tokens": 444
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.4284437039669257
+    },
+    {
+      "question": "How far in advance must PTO be requested?",
+      "ground_truth": "PTO must be requested at least 2 weeks in advance.",
+      "answerable": true,
+      "answer": "PTO must be requested via the HR portal at least 2 weeks in advance.",
+      "confidence": 0.255030022532156,
+      "refused": false,
+      "latency_ms": 24252,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 2875,
+        "completion_tokens": 826
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8736499231262712
+    },
+    {
+      "question": "Who needs to approve a PTO request?",
+      "ground_truth": "The direct manager.",
+      "answerable": true,
+      "answer": "The direct manager must approve a PTO request.",
+      "confidence": 0.17152634092314065,
+      "refused": false,
+      "latency_ms": 18358,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 2857,
+        "completion_tokens": 830
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.978180345876683
+    },
+    {
+      "question": "Which system must be used to request PTO?",
+      "ground_truth": "The HR portal.",
+      "answerable": true,
+      "answer": "The HR portal must be used to request PTO.",
+      "confidence": 0.1476953023771101,
+      "refused": false,
+      "latency_ms": 23241,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 2862,
+        "completion_tokens": 769
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7605954478124494
+    },
+    {
+      "question": "When did the Employee Leave Policy become effective?",
+      "ground_truth": "March 15, 2025.",
+      "answerable": true,
+      "answer": "March 15, 2025",
+      "confidence": 0.23182286272255923,
+      "refused": false,
+      "latency_ms": 16870,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1961,
+        "completion_tokens": 423
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.09261624292999189
+    },
+    {
+      "question": "How do I request access to the arishem-dev AWS account?",
+      "ground_truth": "Via Okta.",
+      "answerable": true,
+      "answer": "Request access to the `arishem-dev` AWS account via Okta.",
+      "confidence": 0.34256566962640694,
+      "refused": false,
+      "latency_ms": 14407,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1978,
+        "completion_tokens": 420
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9977871740873265
+    },
+    {
+      "question": "What version of Python is required for development at Arishem?",
+      "ground_truth": "Python 3.10+ is required.",
+      "answerable": true,
+      "answer": "Python 3.10 or newer is required for development at Arishem.",
+      "confidence": 0.32990576746720013,
+      "refused": false,
+      "latency_ms": 12221,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1977,
+        "completion_tokens": 518
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999999994
+    },
+    {
+      "question": "Which tool is used for dependency management in the engineering team?",
+      "ground_truth": "uv is used for dependency management.",
+      "answerable": true,
+      "answer": "uv",
+      "confidence": 0.1842927588996542,
+      "refused": false,
+      "latency_ms": 17018,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1960,
+        "completion_tokens": 623
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.08608512257826577
+    },
+    {
+      "question": "Where should I add my generated SSH key?",
+      "ground_truth": "To your GitHub profile.",
+      "answerable": true,
+      "answer": "Add your generated SSH key to your GitHub profile.",
+      "confidence": 0.09101325179160323,
+      "refused": false,
+      "latency_ms": 17839,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1963,
+        "completion_tokens": 425
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7589517400251088
+    },
+    {
+      "question": "What database does the backend use in production?",
+      "ground_truth": "PostgreSQL.",
+      "answerable": true,
+      "answer": "PostgreSQL",
+      "confidence": 0.22073379843398233,
+      "refused": false,
+      "latency_ms": 12360,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1956,
+        "completion_tokens": 485
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.4998657754185069
+    },
+    {
+      "question": "Which vector store does Arishem use?",
+      "ground_truth": "Qdrant.",
+      "answerable": true,
+      "answer": "Arishem uses Qdrant as its vector store.",
+      "confidence": 0.27299644667933143,
+      "refused": false,
+      "latency_ms": 15107,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1965,
+        "completion_tokens": 389
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999998671
+    },
+    {
+      "question": "What is the naming convention for a new feature branch?",
+      "ground_truth": "feature/XYZ-123-short-desc.",
+      "answerable": true,
+      "answer": "The naming convention for a new feature branch is `feature/XYZ-123-short-desc`.",
+      "confidence": 0.15345691981503345,
+      "refused": false,
+      "latency_ms": 16305,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1974,
+        "completion_tokens": 456
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999999991
+    },
+    {
+      "question": "How many approvals are required before merging a PR to main?",
+      "ground_truth": "At least one approving review from a code owner.",
+      "answerable": true,
+      "answer": "At least one approving review from a code owner is required before merging a PR to main.",
+      "confidence": 0.22396886156310952,
+      "refused": false,
+      "latency_ms": 12793,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1977,
+        "completion_tokens": 409
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.6249100301130793
+    },
+    {
+      "question": "When do production deployments happen?",
+      "ground_truth": "Every Tuesday and Thursday at 10 AM PST.",
+      "answerable": true,
+      "answer": "Production deployments happen every Tuesday and Thursday at 10 AM PST.",
+      "confidence": 0.2373339686489033,
+      "refused": false,
+      "latency_ms": 14966,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1959,
+        "completion_tokens": 417
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9911577278835199
+    },
+    {
+      "question": "What happens when code is merged to main?",
+      "ground_truth": "It deploys to staging automatically.",
+      "answerable": true,
+      "answer": "When code is merged to the main branch, it triggers an automatic deployment to the staging environment.",
+      "confidence": 0.07192812170072842,
+      "refused": false,
+      "latency_ms": 15174,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1971,
+        "completion_tokens": 450
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8833161119965564
+    },
+    {
+      "question": "Who should be contacted for urgent deployment issues?",
+      "ground_truth": "Tag @sre-oncall in the #eng-incidents Slack channel.",
+      "answerable": true,
+      "answer": "@sre-oncall",
+      "confidence": 0.22428495241641327,
+      "refused": false,
+      "latency_ms": 13285,
+      "usage": {
+        "llm_calls": 3,
+        "prompt_tokens": 1957,
+        "completion_tokens": 488
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.5290233339524659
+    },
+    {
+      "question": "Are we compliant with HIPAA regulations?",
+      "ground_truth": "I don't have enough information to answer that.",
+      "answerable": false,
+      "answer": "I don't have enough relevant context in the uploaded documents to answer your question confidently.",
+      "confidence": 0.058492030819781445,
+      "refused": true,
+      "latency_ms": 486,
+      "usage": {
+        "llm_calls": 1,
+        "prompt_tokens": 241,
+        "completion_tokens": 135
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "question": "What is the capital of France?",
+      "ground_truth": "I don't have enough information to answer that.",
+      "answerable": false,
+      "answer": "I don't have enough relevant context in the uploaded documents to answer your question confidently.",
+      "confidence": -0.0032752837620090665,
+      "refused": true,
+      "latency_ms": 511,
+      "usage": {
+        "llm_calls": 1,
+        "prompt_tokens": 240,
+        "completion_tokens": 84
+      },
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    }
+  ]
+}
