@@ -24,6 +24,22 @@ class LlmClientTests(TestCase):
         self.assertEqual(llm.runnable.model_name, agent.GROQ_MODEL)
         self.assertEqual(llm.fallbacks[0].model_name, agent.GROQ_FALLBACK_MODEL)
 
+    def test_primary_fails_over_at_once_instead_of_waiting(self):
+        """
+        Groq's retry-after on a 429 can be a minute, and the client honours it. A
+        retrying primary made users wait 60-80 s (measured) before the fallback,
+        which has its own quota and answers in under a second, ever ran.
+        """
+        llm = agent._get_llm()
+        self.assertEqual(llm.runnable.max_retries, 0)
+        self.assertEqual(llm.fallbacks[0].max_retries, agent.LLM_MAX_RETRIES)
+
+    def test_a_lone_model_keeps_its_retries(self):
+        """With nothing to fail over to, waiting is the only option left."""
+        with patch.object(agent, "GROQ_FALLBACK_MODEL", agent.GROQ_MODEL):
+            llm = agent._get_llm()
+        self.assertEqual(llm.max_retries, agent.LLM_MAX_RETRIES)
+
     def test_no_fallback_chain_when_both_models_are_the_same(self):
         with patch.object(agent, "GROQ_FALLBACK_MODEL", agent.GROQ_MODEL):
             llm = agent._get_llm()

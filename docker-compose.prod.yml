@@ -82,7 +82,7 @@ services:
     <<: *app
     # 2 workers is what a 2 GiB box holds once each has loaded the embedding model.
     command: >
-      gunicorn backend.wsgi:application --bind 0.0.0.0:8000
+      gunicorn backend.wsgi:application --config gunicorn.conf.py --bind 0.0.0.0:8000
       --workers 2 --timeout 120 --access-logfile - --error-logfile -
     depends_on:
       <<: *app-deps

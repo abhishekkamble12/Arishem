@@ -23,6 +23,11 @@ WORKDIR /home/arishem/app
 # Copying first would re-download the model on every rebuild.
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
+# The model is now in the image, so stop the libraries asking the Hugging Face Hub
+# whether a newer revision exists. That check cost ~5.7 s on every model load
+# (1.1 s offline against 6.8 s online), and it fails outright without internet.
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
 COPY --chown=arishem:arishem . .
 RUN mkdir -p local_storage
 
@@ -30,6 +35,6 @@ RUN mkdir -p local_storage
 RUN SECRET_KEY=build-time-placeholder DEBUG=False python manage.py collectstatic --noinput
 
 EXPOSE 8000
-CMD ["gunicorn", "backend.wsgi:application", \
+CMD ["gunicorn", "backend.wsgi:application", "--config", "gunicorn.conf.py", \
      "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", \
      "--access-logfile", "-", "--error-logfile", "-"]

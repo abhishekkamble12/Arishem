@@ -79,7 +79,9 @@ services:
 
   worker:
     <<: *app
-    command: celery -A backend worker --loglevel=info
+    # Each worker process loads its own copy of the embedding model (~400 MB) at
+    # start-up. Unpinned, Celery starts one process per CPU core.
+    command: celery -A backend worker --concurrency 2 --loglevel=info
     depends_on:
       <<: *app-deps
       migrate: {condition: service_completed_successfully}

@@ -58,7 +58,7 @@ SELF_CRITIQUE        = config("SELF_CRITIQUE_ENABLED", default="true").lower() =
 _llm: Runnable | None = None
 
 
-def _build_llm(model: str) -> ChatGroq:
+def _build_llm(model: str, max_retries: int = LLM_MAX_RETRIES) -> ChatGroq:
     return ChatGroq(
         model=model,
         temperature=0.2,
@@ -66,7 +66,7 @@ def _build_llm(model: str) -> ChatGroq:
         # Without a timeout a hung Groq connection holds a gunicorn worker open
         # until the client gives up; max_retries covers 429s and 5xx.
         timeout=LLM_TIMEOUT_SECONDS,
-        max_retries=LLM_MAX_RETRIES,
+        max_retries=max_retries,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
 
@@ -117,21 +117,28 @@ class UsageCollector(BaseCallbackHandler):
 
 def _get_llm(collector: UsageCollector | None = None) -> Runnable:
     """
-    The primary model, backed by a second one. Retries inside the client cover
-    transient errors; the fallback covers a model being retired, overloaded or
-    rejecting the request outright, which a retry would never fix.
+    The primary model, backed by a second one.
+
+    When there is a fallback, the primary does not retry: it fails over at once.
+    Groq answers a rate-limited request with a retry-after of up to a minute, and
+    the client honours it, so a retrying primary left a user staring at a spinner
+    for 60-80 s - measured - before the fallback ever ran, although the fallback
+    model has its own quota and answers in under a second. Retries belong on the
+    last model in the chain, where waiting is the only option left. With no
+    fallback (as in the evaluation harness, where a batch can afford to wait),
+    the single model keeps its retries.
 
     With a collector, the returned runnable is a cheap binding around the same
     cached client that reports usage to it.
     """
     global _llm
     if _llm is None:
-        primary = _build_llm(GROQ_MODEL)
         if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
+            primary = _build_llm(GROQ_MODEL, max_retries=0)
             _llm = primary.with_fallbacks([_build_llm(GROQ_FALLBACK_MODEL)])
             logger.info("ChatGroq ready (model: %s, fallback: %s)", GROQ_MODEL, GROQ_FALLBACK_MODEL)
         else:
-            _llm = primary
+            _llm = _build_llm(GROQ_MODEL)
             logger.info("ChatGroq ready (model: %s, no fallback)", GROQ_MODEL)
     return _llm.with_config(callbacks=[collector]) if collector else _llm
 
