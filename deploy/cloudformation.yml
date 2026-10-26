@@ -9,7 +9,7 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: {default: Size and cost}
-        Parameters: [InstanceType, Architecture, RootVolumeGiB, MonthlyBudgetUSD, AlertEmail]
+        Parameters: [InstanceType, Architecture, RootVolumeGiB, BackupRetentionDays, MonthlyBudgetUSD, AlertEmail]
       - Label: {default: Application}
         Parameters: [RepoUrl, RepoBranch, DomainName]
 
@@ -32,6 +32,14 @@ Parameters:
     MinValue: 20
     MaxValue: 100
     Description: 30 GiB fits the Docker images (torch is large) with room for data.
+  BackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 90
+    Description: >
+      How many daily snapshots of the volume to keep. Snapshots are incremental and
+      billed only for blocks in use, at $0.05/GB-month in ap-south-1.
   MonthlyBudgetUSD:
     Type: Number
     Default: 20
@@ -171,6 +179,8 @@ Resources:
         HttpTokens: required          # IMDSv2 only
       Tags:
         - {Key: Name, Value: !Ref AWS::StackName}
+        # Selects this instance for the daily snapshot policy below.
+        - {Key: arishem-backup, Value: !Ref AWS::StackName}
       UserData:
         Fn::Base64: !Sub
           - |
@@ -244,6 +254,44 @@ Resources:
               - !Sub "https://${DomainName}"
               - !Sub "http://${ElasticIP}"
             SslRedirect: !If [HasDomain, "True", "False"]
+
+  # ── Backups ─────────────────────────────────────────────────────────────────
+  # Postgres and Qdrant both live on the instance's one volume, so snapshotting
+  # the instance backs up both. The snapshots are crash-consistent, the same state
+  # as pulling the power. Postgres replays its WAL on start, and so does Qdrant,
+  # so a restored volume comes back the way a server does after an outage.
+  SnapshotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: dlm.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+
+  DailySnapshots:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: !Sub "Daily snapshots of the ${AWS::StackName} instance"
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt SnapshotRole.Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes: [INSTANCE]
+        TargetTags:
+          - {Key: arishem-backup, Value: !Ref AWS::StackName}
+        Schedules:
+          - Name: daily
+            CopyTags: true
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times: ["20:30"]   # UTC; 02:00 in India, when nobody is uploading
+            RetainRule:
+              Count: !Ref BackupRetentionDays
 
   # ── Cost guardrail ──────────────────────────────────────────────────────────
   Budget:

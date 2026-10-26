@@ -14,8 +14,14 @@ the AWS Pricing API on 2026-10-26. They are list prices, not a bill you have see
 | EBS gp3 root volume, 30 GiB | $0.0912/GB-mo | **$2.74** |
 | Public IPv4 address (in use) | $0.005/hr | **$3.65** |
 | S3 Standard, ~5 GiB of documents | $0.025/GB-mo | **$0.12** |
-| CloudFormation, IAM, Budgets, Parameter Store, Session Manager | — | **$0.00** |
-| | | **≈ $14.69/month** |
+| EBS snapshots, 7 daily, ~8–10 GB in use (estimate) | $0.05/GB-mo | **≈ $0.50** |
+| CloudFormation, IAM, Budgets, Parameter Store, Session Manager, DLM | — | **$0.00** |
+| | | **≈ $15.19/month** |
+
+The snapshot line is the only estimate: the $0.05/GB-month rate comes from the
+Pricing API, but the GB is a guess at how much of the 30 GiB volume the OS, the
+Docker images and the data actually occupy. Snapshots are incremental and bill only
+for blocks in use.
 
 Notes that actually matter for the bill:
 
@@ -133,28 +139,61 @@ anyway. There is no client secret in this flow, because the backend only verifie
 signed ID token. If the button shows `origin_mismatch`, the origin in step 2 is
 missing or does not match the address bar exactly, including the port.
 
+### Backups and restoring
+
+A Data Lifecycle Manager policy snapshots the instance's volume every day at
+20:30 UTC and keeps the last `BackupRetentionDays` (default 7). Postgres, Qdrant and
+the Docker volumes all live on that one volume, so one snapshot covers everything.
+
+The snapshots are crash-consistent: the same state as pulling the power. Postgres
+and Qdrant both replay their write-ahead logs on start, so a restored volume comes
+back the way a server does after an outage, without a separate dump step.
+
+To restore, take the newest snapshot, create a volume from it, and swap it in:
+
+```powershell
+aws ec2 describe-snapshots --owner-ids self --region ap-south-1 `
+  --filters Name=tag:arishem-backup,Values=arishem `
+  --query 'sort_by(Snapshots,&StartTime)[-1].[SnapshotId,StartTime]' --output table
+# Stop the instance, detach its root volume, create a volume from the snapshot in
+# the same Availability Zone, attach it as /dev/xvda, and start the instance.
+```
+
+This has been validated as a template (`validate-template`, `cfn-lint`). It has
+not yet run on a deployed stack, so the first scheduled snapshot is unobserved.
+
 ### Tearing it down
 
 ```powershell
 aws cloudformation delete-stack --stack-name arishem --region ap-south-1
 ```
 
-The S3 bucket is `Retain`, so your documents survive the stack. Delete it by
-hand once you are sure:
+Two things outlive the stack and keep billing until you remove them:
 
 ```powershell
+# 1. The bucket is Retain, so your documents survive.
 aws s3 rb s3://<DocumentsBucketName> --force
+
+# 2. Snapshots are kept when the policy that made them is deleted.
+aws ec2 describe-snapshots --owner-ids self --region ap-south-1 `
+  --filters Name=tag:arishem-backup,Values=arishem --query 'Snapshots[].SnapshotId' --output text
+aws ec2 delete-snapshot --snapshot-id <id> --region ap-south-1   # once per id
 ```
 
 ## Known gaps
 
-- **The refusal threshold is fitted on a small set.** The default is 0.065. On the
-  30-question golden set, answerable questions scored 0.072–0.376 and unanswerable
-  ones −0.003–0.059, and the previous default of 0.35 refused 27 of 28 answerable
-  questions (see `evals/SCORECARD.md`). Only two of those questions were
-  unanswerable, so the gap is real but narrow. Watch `confidence` and the
-  `refused` flag in `PredictionLog` as a real corpus grows; if good questions start
-  being refused, rerun `evals/run_eval.py` and read the sweep before moving it.
-- **No backups.** Postgres and Qdrant live on one EBS volume with no snapshot
-  schedule. Add one before this holds anything you care about.
-- **One instance is one point of failure.** A reboot is downtime.
+- **The refusal threshold is a weak, corpus-dependent signal.** The default, 0.065,
+  was fitted on a three-document corpus where the previous 0.35 refused 27 of 28
+  answerable questions. On the nine-document hard suite, answerable and plausible
+  unanswerable questions overlap in confidence, so no threshold separates them, and
+  the threshold mainly stops clearly off-topic questions. Confidence is the *mean* of
+  the top-k, which drifts with corpus size. Watch `confidence` and the `refused` flag
+  in `PredictionLog` as a real corpus grows, and rerun `evals/run_eval.py` before
+  moving the threshold.
+- **One instance is one point of failure, by design.** A reboot is downtime. AWS
+  restarts the instance on a host failure (`t4g.small` supports automatic
+  recovery), and the daily snapshots cover data loss, but there is no second box.
+  Removing that means an Auto Scaling group behind a load balancer, with Postgres
+  and Qdrant moved off the instance to managed services: roughly $30–60 a month
+  more for a system with no users yet.
+- **Backups lose up to a day.** One snapshot a day bounds data loss at 24 hours.
