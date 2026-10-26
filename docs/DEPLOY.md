@@ -117,12 +117,13 @@ aws s3 rb s3://<DocumentsBucketName> --force
 
 ## Known gaps
 
-- **The refusal threshold has only been checked against one document.** On an
-  end-to-end run (real S3, Qdrant and Groq) a question answerable from an uploaded
-  retention policy scored **0.712** and an unrelated question scored **-0.076**, so
-  the 0.35 default sits well between them. That is one document, not a calibration:
-  watch `confidence` in `PredictionLog` as a real corpus grows and move
-  `RAG_CONFIDENCE_THRESHOLD` if good questions start being refused.
+- **The refusal threshold is fitted on a small set.** The default is 0.065. On the
+  30-question golden set, answerable questions scored 0.072–0.376 and unanswerable
+  ones −0.003–0.059, and the previous default of 0.35 refused 27 of 28 answerable
+  questions (see `evals/SCORECARD.md`). Only two of those questions were
+  unanswerable, so the gap is real but narrow. Watch `confidence` and the
+  `refused` flag in `PredictionLog` as a real corpus grows; if good questions start
+  being refused, rerun `evals/run_eval.py` and read the sweep before moving it.
 - **No backups.** Postgres and Qdrant live on one EBS volume with no snapshot
   schedule. Add one before this holds anything you care about.
 - **One instance is one point of failure.** A reboot is downtime.

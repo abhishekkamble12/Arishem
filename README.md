@@ -3,7 +3,8 @@
 A multi-tenant retrieval-augmented generation (RAG) backend. Teams upload documents
 and recordings into isolated workspaces, then ask questions that are answered only
 from their own files, with citations. Questions the documents can't answer are
-refused before the LLM is called.
+refused on a retrieval-confidence check instead of being answered from the model's
+own knowledge.
 
 **Stack:** Django REST Framework · Celery + Redis · Qdrant · sentence-transformers
 (`all-MiniLM-L6-v2`) · Groq (`openai/gpt-oss-20b`) · PostgreSQL · S3 · React + TypeScript
@@ -14,19 +15,19 @@ refused before the LLM is called.
 
 ## Measured, not claimed
 
-Numbers below come from runs recorded in [Verified behaviour](#verified-behaviour).
-Anything not listed there has not been measured, and this README does not claim it.
+Every number below traces to a recorded run. Anything not listed has not been
+measured, and this README does not claim it.
 
 | | |
 |---|---|
-| Tests | 87, all offline (vector store and LLM faked), 77% line coverage of `app/` + `Services/` |
-| Retrieval confidence, in-domain | **0.712** on a question answerable from an uploaded policy document |
-| Retrieval confidence, out-of-domain | **-0.076**, refused before any LLM call |
-| End-to-end query latency | **15.8s** in agentic mode (4 Groq calls), **~1s** single-pass |
+| Deployed and tested on AWS | **32/32 checks passed** over the network against a live stack, then torn down — [docs/DEPLOYMENT_VERIFICATION.md](docs/DEPLOYMENT_VERIFICATION.md) |
+| Faithfulness (RAGAS) | **1.00** on 28 answered golden-set questions — but saturated; see [Evaluation](#evaluation) |
+| Refusal accuracy | **30/30**: all 28 answerable questions answered, both unanswerable ones refused |
+| Answer relevancy (RAGAS) | 0.71 answered-only — mostly a length signal here, not quality; see [Evaluation](#evaluation) |
+| Tests | 97, all offline (vector store, LLM and S3 faked), 79% line coverage of `app/` + `Services/` |
+| Query latency, deployed | **16.0 s** per answered query in agentic mode (3 sequential Groq calls) |
+| Tokens per answered query | **1,041 in + 449 out** on the deployed system |
 | Deployment cost | **~\$14.69/month** on AWS, from live Pricing API rates — see [docs/DEPLOY.md](docs/DEPLOY.md) |
-
-There is an evaluation harness in `evals/`, but **it has not been run** — see
-[Evaluation](#evaluation). No faithfulness or relevancy score is claimed anywhere.
 
 ---
 
@@ -35,12 +36,13 @@ There is an evaluation harness in `evals/`, but **it has not been run** — see
 | Area | Implementation |
 |---|---|
 | **Ingestion** | `POST /upload-direct` stores the file under `ws_<id>/<uuid>_<name>`, records it as `PENDING`, enqueues a Celery task and returns `202`. The worker extracts text (PyMuPDF / docx2txt / Unstructured, or Whisper for audio & video), chunks it (800 chars, 150 overlap), embeds it and writes it to Qdrant. |
-| **Querying** | The question is embedded and searched in Qdrant, filtered to the caller's workspace. If the mean similarity of the top-k chunks is below a threshold (default 0.35), the API refuses without calling the LLM. Otherwise the LLM answers in a JSON schema with citations. |
+| **Querying** | The question is embedded and searched in Qdrant, filtered to the caller's workspace. If the mean similarity of the top-k chunks is below a threshold (default 0.065, calibrated on the golden set), the API refuses instead of answering. Otherwise the LLM answers in a JSON schema with citations. In single-pass mode the refusal happens before any LLM call; in agentic mode the decomposition call has already been made, so it skips synthesis and self-critique but is not free. |
 | **Agentic mode** (optional) | The LLM splits multi-part questions into sub-queries, retrieves for each, synthesises, then self-critiques the answer against the chunks and retries once if claims are unsupported. Any failure falls back to single-pass RAG. |
 | **Multi-tenancy** | One Qdrant collection with an indexed `metadata.workspace_id` payload filter applied on every search. Storage keys are namespaced per workspace. Every file, query and meeting endpoint checks workspace membership. |
 | **Roles** | Viewer / Editor / Admin held **per workspace** (`Membership`), so you can be admin of your own project and a viewer on another team's. A sign-up is admin of its own workspace only, and reaches any other workspace solely because that workspace's admin added them. A workspace always keeps one admin. |
 | **Sign-in** | Email and password, or Google (One Tap / OAuth 2.0 ID token). Google tokens are verified against `GOOGLE_CLIENT_ID` and rejected unless the address is verified; a matching email links to the existing account. Unset client id means `/auth/google` answers `503` and email sign-in is unaffected. |
 | **Consistency** | `PENDING → PROCESSING → SUCCESS/FAILED` state machine. Tasks are idempotent (safe to redeliver), and a Celery Beat job fails anything stuck for more than 30 minutes. Deleting a file removes its vectors, stored object and DB row, in that order. |
+| **Cost** | Every query records its LLM call count and prompt/completion tokens on `PredictionLog`; `/app/ai/monitoring` sums them per workspace. The dollar figure is whatever the recorded tokens multiply out to at the rates you configure (`LLM_INPUT_COST_PER_MTOK`, `LLM_OUTPUT_COST_PER_MTOK`), which default to zero so the endpoint never shows an invented price. |
 | **Observability** | Every query is logged with latency and confidence. If the rolling mean confidence of the last 50 queries drops below the threshold, a `DriftLog` is recorded and admins are emailed (at most once an hour). |
 | **Meeting intelligence** | YouTube URLs or uploaded recordings are transcribed locally with Whisper, then summarised into title, summary, action items, decisions and open questions. |
 
@@ -72,12 +74,15 @@ with an indexed `workspace_id` filter keeps memory flat. The trade-off is that
 isolation depends on the filter always being applied, so it is built in one place
 (`Services/agent.py: query`) and covered by a test.
 
-**Refusing before generation.** A low mean similarity across the top-k chunks is a
-cheap signal that the documents don't cover the question. Refusing at that point
-avoids an LLM call and avoids a confident-sounding wrong answer. The threshold is a
-blunt instrument: a relevant question phrased very differently from the source text
-can score low. It is configurable via `RAG_CONFIDENCE_THRESHOLD` so it can be tuned
-against the eval set.
+**Refusing on retrieval confidence.** A low mean similarity across the top-k chunks
+is a cheap signal that the documents don't cover the question, and refusing beats a
+confident-sounding wrong answer. It is also cheaper: measured at 1 call and 307
+tokens versus 3 calls and 1,481 for an answered question. Note that only
+single-pass mode refuses with no LLM call at all — in agentic mode the decomposition
+call precedes the check, so a refusal costs about a fifth of an answer rather than
+nothing. The threshold is a blunt instrument: a relevant question phrased very
+differently from the source text can score low. It is configurable via
+`RAG_CONFIDENCE_THRESHOLD`.
 
 **Database row and vectors are written separately (no distributed transaction).**
 The row is created first (`PENDING`) and marked `SUCCESS` only after Qdrant confirms
@@ -110,27 +115,67 @@ workspace being acted on (`app/utils.py: resolve_workspace`).
 
 ## Evaluation
 
-**Status: the harness exists and has not been run. There are no scores to report.**
-
 `evals/run_eval.py` indexes three policy documents (PDF, TXT, MD) into an in-memory
 Qdrant using the production chunking settings, runs a 30-question golden set
 ([`evals/golden_set.json`](evals/golden_set.json)) through the real query pipeline,
-and scores the results with RAGAS.
+and scores the answers with RAGAS. Full results: [`evals/SCORECARD.md`](evals/SCORECARD.md),
+per question in [`evals/eval_results.json`](evals/eval_results.json).
+
+| | Answered only (28) |
+|---|---|
+| Faithfulness | **1.00** |
+| Answer relevancy | 0.71 |
+| Refusals | 2/30 — exactly the two questions the corpus cannot answer |
+| Latency | median 14.7 s, p95 23.2 s |
+
+Generator `openai/gpt-oss-20b`, judge `qwen/qwen3.8-27b` — deliberately a different
+model family, so the judge is not grading its own output.
+
+**What the first run found.** It refused **29 of 30** questions, including ones the
+corpus answers verbatim, and scored faithfulness 0.00 because almost nothing was
+answered. The refusal threshold (0.35) had been inherited from a retired embedding
+model. Answerable questions actually score 0.072–0.376 and unanswerable ones
+−0.003–0.059, so 0.35 was rejecting nearly everything. The harness now prints a
+threshold sweep — retrieval confidence does not depend on the threshold, so one run
+gives the whole curve — and the default is 0.065, the midpoint of the gap. That is
+fitted on two negative examples, which is thin: widen the golden set before
+trusting a more precise value.
+
+**How to read the numbers.** Both need a caveat, and the scorecard prints them:
+
+- **Faithfulness is saturated, and it is real.** A score that never drops below 1.0
+  cannot by itself tell "the system does not hallucinate" from "the judge passes
+  everything", so [`evals/judge_control.py`](evals/judge_control.py) feeds the same
+  judge answers with known defects. It scores a faithful answer 1.00, a fabricated
+  one 0.00, a half-fabricated one 0.50 and a wrong figure 0.00. So the 1.0 is
+  genuine — but the questions are single-fact lookups over a corpus small enough
+  that every query retrieves all of it. It shows the system does not hallucinate on
+  easy questions, and says nothing about hard ones.
+- **Answer relevancy is mostly measuring length.** It correlates +0.71 with answer
+  word count: answers of four words or fewer average 0.29 even though every one is
+  correct (`uv` scores 0.086), while longer answers average 0.88. RAGAS scores
+  relevancy by regenerating the question from the answer, which a correct one-word
+  answer cannot do.
+- `context_precision` and `context_recall` are not reported. With four chunks and
+  `top_k=5`, every query retrieves the whole corpus, so they have nothing to
+  discriminate between.
 
 ```bash
-pip install -r backend/requirements-optional.txt   # ragas is not a runtime dependency
-python evals/run_eval.py                           # from the repo root; needs GROQ_API_KEY
+pip install -r backend/requirements-optional.txt     # ragas is not a runtime dependency
+python evals/run_eval.py                             # generate, cache answers, score
+EVAL_REUSE_ANSWERS=1 python evals/run_eval.py        # rescore the cache, no generation
+EVAL_REPORT_ONLY=1   python evals/run_eval.py        # rebuild the report, no model calls
+python evals/judge_control.py                        # check the judge can fail
 ```
 
-An earlier `SCORECARD.md` in this repo reported faithfulness 0.9231 and three
-similar figures. Those numbers were not reproducible — `ragas` was in no
-requirements file, so the harness could not import, and the judge model it named
-has since been retired by Groq. The file has been deleted rather than left to
-imply a result that was never produced.
+Generation, scoring and reporting are separate because a free Groq tier caps tokens
+per day, and four metrics over 30 questions exhausted it mid-run.
 
-When it is run, expect two caveats to apply: 30 questions is a small set, and
-using a Groq model to judge a Groq model shares failure modes, so the output is a
-regression signal rather than an absolute quality measure.
+An earlier `SCORECARD.md` in this repo reported faithfulness 0.9231 and three
+similar figures. Those were not reproducible: `ragas` was in no requirements file,
+Django was never configured so the harness could not even import, the judge model
+it named had been retired, and the "PDF" in the corpus was a text file. It was
+deleted rather than left to imply a result that was never produced.
 
 ## Running it
 
@@ -172,9 +217,9 @@ cd backend
 python manage.py test --settings=backend.test_settings
 ```
 
-87 tests, all offline: the vector store, LLM and S3 are replaced with fakes, so no
+97 tests, all offline: the vector store, LLM and S3 are replaced with fakes, so no
 test needs a network call or an API key. CI runs them with coverage on every push
-(77% line coverage of `app/` and `Services/`). They cover:
+(79% line coverage of `app/` and `Services/`). They cover:
 
 - auth, JWT and per-workspace roles, including that a sign-up cannot grant itself a
   role, that a role in one workspace grants nothing in another, and that a workspace
@@ -185,11 +230,14 @@ test needs a network call or an API key. CI runs them with coverage on every pus
 - storage-key namespacing and path-traversal rejection, and that the S3 and local
   backends fail identically for a missing object
 - delete ordering and failure behaviour
-- refusal logic in both simple and agentic modes (the LLM is never called below the
-  threshold)
+- refusal logic in both modes: single-pass makes no LLM call below the threshold,
+  and agentic refuses after decomposition (`test_low_confidence_refuses_after_decomposition`)
 - the ingestion task's success, failure and redelivery paths, and stuck-job
   reconciliation
 - the LLM client's timeout, retry and fallback configuration
+- token accounting: totals across the calls one query makes, both shapes of usage
+  metadata, persistence on `PredictionLog`, and that unset cost rates report \$0.00
+  rather than a made-up price
 
 ### Verified behaviour
 
@@ -265,13 +313,16 @@ The template is validated (`validate-template` and `cfn-lint`, no findings) but
 
 ## Known limitations
 
-- **The evaluation harness has never been run**, so retrieval and answer quality are
-  unmeasured beyond the single end-to-end document above. This is the biggest gap.
-- **No cost or token tracking.** Agentic mode makes 3–4 LLM calls per query and
-  nothing records the spend.
+- **The evaluation set is too easy.** Faithfulness is at its ceiling because every
+  question is a single-fact lookup over four chunks. It needs multi-hop questions, a
+  larger corpus where retrieval actually has to choose, and many more unanswerable
+  questions before it can tell a good change from a bad one. This is the biggest gap.
 - **No prompt-injection guard.** A document can carry instructions into the prompt.
-- The refusal threshold (0.35) is supported by one document's measurements, not a
-  calibration across a real corpus.
+- The refusal threshold (0.065) is fitted on 28 answerable and only 2 unanswerable
+  questions. The gap it sits in is real but narrow (0.059 to 0.072).
+- 16 s per answer is slow for a chat interface. The cause is agentic mode's three
+  sequential LLM calls; single-pass mode is roughly a third of that, with its
+  quality cost not yet measured.
 - Drift checking runs inside the query request. It should move to a Celery task.
 - Retrieval is dense-only. Hybrid BM25 + vector search or a reranker would help
   keyword-heavy questions.
