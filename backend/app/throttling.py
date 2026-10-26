@@ -8,7 +8,7 @@ class CostControlRoleThrottle(SimpleRateThrottle):
     (LLM inference, embeddings, and transcription).
 
     Rather than generic abuse prevention, this enforces separate usage budgets per user role:
-      - Admin / Editor: Higher quota for operational administration & ingestion.
+      - Admin / Editor: Higher quota (a user's tier is their highest role in any workspace).
       - Viewer: Heavily capped quota to control external token and API costs.
     """
     scope = 'cost_control'
@@ -29,7 +29,7 @@ class CostControlRoleThrottle(SimpleRateThrottle):
 
         # Configure rate limit based on role (overridable via env variables)
         if role == 'admin':
-            self.rate = config("THROTTLE_RATE_ADMIN", default="100/min")
+            self.rate = config("THROTTLE_RATE_ADMIN", default="60/min")
         elif role == 'editor':
             self.rate = config("THROTTLE_RATE_EDITOR", default="60/min")
         else:  # viewer

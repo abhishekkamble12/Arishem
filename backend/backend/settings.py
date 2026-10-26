@@ -237,13 +237,10 @@ if STORAGE_BACKEND not in ("local", "s3"):
     raise ValueError("STORAGE_BACKEND must be 'local' or 's3'")
 
 # ── Signup, input and cost limits ─────────────────────────────────────────────
-# Self-registered users get this role in their own personal workspace. Every
-# endpoint checks workspace membership, so an editor cannot touch another
-# tenant's data. Use "viewer" for a closed deployment where admins promote users.
-SIGNUP_ROLE = config("SIGNUP_ROLE", default="editor")
-if SIGNUP_ROLE not in ("viewer", "editor"):
-    raise ValueError("SIGNUP_ROLE must be 'viewer' or 'editor' (admins are promoted by an admin)")
+# Roles are per workspace: a new user is admin of their own personal workspace and
+# gets access to others only when that workspace's admin adds them.
 
+MAX_WORKSPACES_PER_USER = config("MAX_WORKSPACES_PER_USER", default=5, cast=int)
 MAX_QUESTION_CHARS = config("MAX_QUESTION_CHARS", default=1000, cast=int)
 MAX_TOP_K = config("MAX_TOP_K", default=10, cast=int)
 MAX_UPLOAD_MB = config("MAX_UPLOAD_MB", default=25, cast=int)

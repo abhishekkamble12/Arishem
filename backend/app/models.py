@@ -9,16 +9,28 @@ ROLE_VIEWER = "viewer"
 ALL_ROLES   = [ROLE_ADMIN, ROLE_EDITOR, ROLE_VIEWER]
 
 
+ROLE_RANK = {ROLE_VIEWER: 0, ROLE_EDITOR: 1, ROLE_ADMIN: 2}
+EDIT_ROLES = (ROLE_ADMIN, ROLE_EDITOR)
+
+
 class Workspace(models.Model):
     """
     Groups users and ingested files to provide SaaS-style tenant isolation.
+    A user's role is per workspace (see Membership), so someone can be an admin
+    of their own project and a viewer in another team's.
     """
     name = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
-    members = models.ManyToManyField("User", related_name="workspaces")
+    members = models.ManyToManyField("User", through="Membership", related_name="workspaces")
 
     def __str__(self):
         return self.name
+
+    def add_member(self, user, role: str = ROLE_VIEWER) -> "Membership":
+        membership, _ = Membership.objects.update_or_create(
+            workspace=self, user=user, defaults={"role": role}
+        )
+        return membership
 
 
 class User(AbstractUser):
@@ -37,17 +49,39 @@ class User(AbstractUser):
     class Meta:
         db_table = "app_user"
 
+    def role_in(self, workspace_id: int) -> str | None:
+        """This user's role in a workspace, or None if they are not a member."""
+        return (
+            Membership.objects.filter(user=self, workspace_id=workspace_id)
+            .values_list("role", flat=True)
+            .first()
+        )
+
     @property
     def role(self) -> str:
-        """Return the user's role name, defaulting to viewer."""
-        group = self.groups.first()
-        return group.name if group else ROLE_VIEWER
-
-    def has_role(self, *roles: str) -> bool:
-        return self.role in roles
+        """Highest role held in any workspace (viewer if none). Used only for throttle tiers."""
+        roles = Membership.objects.filter(user=self).values_list("role", flat=True)
+        return max(roles, key=ROLE_RANK.__getitem__, default=ROLE_VIEWER)
 
     def __str__(self):
-        return f"{self.email} ({self.role})"
+        return self.email
+
+
+class Membership(models.Model):
+    """A user's role inside one workspace."""
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="memberships")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="memberships")
+    role = models.CharField(max_length=10, choices=[(r, r) for r in ALL_ROLES], default=ROLE_VIEWER)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["workspace", "user"], name="unique_workspace_member"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}@{self.workspace_id} ({self.role})"
 
 
 # ── Ingested file tracker ─────────────────────────────────────────────────────

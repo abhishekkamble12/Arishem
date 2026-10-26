@@ -5,22 +5,20 @@ Tests — auth flow + API endpoint smoke tests.
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
-from django.test import Client, TestCase, override_settings
+from django.test import Client, TestCase
 
 User = get_user_model()
 
 
 def _make_user(email, password, role):
+    """A user with their own workspace, in which they hold `role`."""
     user = User.objects.create_user(
         email=email, username=email.split("@")[0], password=password
     )
-    group, _ = Group.objects.get_or_create(name=role)
-    user.groups.set([group])
 
     from .models import Workspace
     ws = Workspace.objects.create(name=f"{user.username}'s Workspace")
-    ws.members.add(user)
+    ws.add_member(user, role)
     return user
 
 
@@ -38,7 +36,7 @@ class AuthTests(TestCase):
     def setUp(self):
         self.client = Client()
 
-    def test_register_creates_editor_by_default(self):
+    def test_register_makes_user_admin_of_own_workspace(self):
         resp = self.client.post(
             "/app/auth/register",
             {"email": "v@test.com", "password": "Pass1234!", "password2": "Pass1234!"},
@@ -46,7 +44,8 @@ class AuthTests(TestCase):
         )
         self.assertEqual(resp.status_code, 201)
         data = resp.json()
-        self.assertEqual(data["user"]["role"], "editor")
+        self.assertEqual(data["user"]["role"], "admin")
+        self.assertEqual(data["user"]["workspaces"][0]["role"], "admin")
         self.assertIn("access", data["tokens"])
 
     def test_register_ignores_requested_role(self):
@@ -57,16 +56,10 @@ class AuthTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.json()["user"]["role"], "editor")
-
-    @override_settings(SIGNUP_ROLE="viewer")
-    def test_signup_role_is_configurable(self):
-        resp = self.client.post(
-            "/app/auth/register",
-            {"email": "w@test.com", "password": "Pass1234!", "password2": "Pass1234!"},
-            content_type="application/json",
-        )
-        self.assertEqual(resp.json()["user"]["role"], "viewer")
+        # Admin only of their own workspace; the request body cannot choose a role
+        user = User.objects.get(email="e@test.com")
+        self.assertEqual(user.memberships.count(), 1)
+        self.assertEqual(user.memberships.get().role, "admin")
 
     def test_new_user_can_upload_into_own_workspace_but_not_anothers(self):
         a = self.client.post("/app/auth/register", {"email": "a@test.com", "password": "Pass1234!", "password2": "Pass1234!"}, content_type="application/json").json()

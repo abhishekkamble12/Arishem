@@ -2,29 +2,44 @@
 Serializers for auth endpoints.
 """
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .models import ALL_ROLES, Workspace
+from .models import ALL_ROLES, ROLE_ADMIN, Membership, Workspace
 
 User = get_user_model()
 
 
 class WorkspaceSerializer(serializers.ModelSerializer):
+    """Workspace plus the requesting user's role in it (pass context={"user": user})."""
+    role = serializers.SerializerMethodField()
+
     class Meta:
         model = Workspace
-        fields = ["id", "name", "created_at"]
+        fields = ["id", "name", "created_at", "role"]
+
+    def get_role(self, obj):
+        user = self.context.get("user")
+        return user.role_in(obj.id) if user else None
+
+
+class MemberSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source="user_id", read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = Membership
+        fields = ["id", "email", "role", "created_at"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     password  = serializers.CharField(write_only=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, label="Confirm password")
 
-    # Role is deliberately NOT accepted from the client: self-registered users get
-    # settings.SIGNUP_ROLE (never admin). Promotion uses the admin-only role endpoint.
+    # Role is deliberately NOT accepted from the client. A new user becomes admin of
+    # the workspace they own; access to anyone else's workspace comes only from that
+    # workspace's admin adding them.
     class Meta:
         model  = User
         fields = ["id", "email", "username", "password", "password2"]
@@ -44,23 +59,31 @@ class RegisterSerializer(serializers.ModelSerializer):
             password = validated_data["password"],
         )
 
-        group, _ = Group.objects.get_or_create(name=settings.SIGNUP_ROLE)
-        user.groups.set([group])
-
-        # Create a default workspace for the user
         workspace = Workspace.objects.create(name=f"{username}'s Workspace")
-        workspace.members.add(user)
+        workspace.add_member(user, ROLE_ADMIN)
 
         return user
 
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.CharField(read_only=True)
-    workspaces = WorkspaceSerializer(many=True, read_only=True)
+    workspaces = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
         fields = ["id", "email", "username", "role", "workspaces", "date_joined", "is_active"]
+
+    def get_workspaces(self, obj):
+        return WorkspaceSerializer(obj.workspaces.order_by("id"), many=True, context={"user": obj}).data
+
+
+class WorkspaceCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100)
+
+
+class MemberAddSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    role = serializers.ChoiceField(choices=ALL_ROLES, default="viewer")
 
 
 class RoleUpdateSerializer(serializers.Serializer):

@@ -1,44 +1,18 @@
 """
-Custom DRF permission classes for role-based access control.
+Permissions.
 
-Usage on a view:
-    @api_view(["POST"])
-    @permission_classes([IsAdminOrEditor])
-    def upload(request): ...
+Roles are per workspace (see models.Membership), so a DRF permission class cannot
+decide on its own. Views require authentication here and then call
+`utils.resolve_workspace(request, data, roles=...)`, which checks the caller's
+role in the workspace being acted on.
 """
 
 from rest_framework.permissions import BasePermission
 
-from .models import ROLE_ADMIN, ROLE_EDITOR
-
-
-class IsAdmin(BasePermission):
-    """Only users in the 'admin' group."""
-    message = "Admin role required."
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.has_role(ROLE_ADMIN)
-        )
-
-
-class IsAdminOrEditor(BasePermission):
-    """Users in 'admin' or 'editor' groups — can upload files."""
-    message = "Editor or Admin role required."
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.has_role(ROLE_ADMIN, ROLE_EDITOR)
-        )
-
 
 class IsAnyRole(BasePermission):
-    """Any authenticated user regardless of role — can query and list."""
+    """Any authenticated user. Workspace role is enforced by resolve_workspace()."""
     message = "Authentication required."
 
     def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated
+        return bool(request.user and request.user.is_authenticated)

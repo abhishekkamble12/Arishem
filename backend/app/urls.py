@@ -12,8 +12,9 @@ urlpatterns = [
     path("auth/login",          views.login,               name="auth_login"),
     path("auth/token/refresh",  TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me",             views.me,                  name="auth_me"),
-    path("auth/workspaces",     views.list_workspaces,     name="list_workspaces"),
-    path("auth/users/<int:user_id>/role", views.set_user_role, name="set_user_role"),
+    path("auth/workspaces",     views.workspaces,          name="workspaces"),
+    path("auth/workspaces/<int:workspace_id>/members", views.workspace_members, name="workspace_members"),
+    path("auth/workspaces/<int:workspace_id>/members/<int:user_id>", views.workspace_member, name="workspace_member"),
 
     # ── AI pipeline ───────────────────────────────────────────────────────
     path("ai/upload",           views.store_vectordb,      name="store_vectordb"),

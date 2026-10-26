@@ -1,8 +1,6 @@
 import requests
 from decouple import config
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from rest_framework import status
@@ -11,7 +9,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Workspace
+from .models import ROLE_ADMIN, Workspace
 from .serializers import UserSerializer
 from .throttling import AuthRateThrottle
 
@@ -47,10 +45,8 @@ def google_login(request):
         )
         if created:
             user.set_unusable_password()
-            group, _ = Group.objects.get_or_create(name=settings.SIGNUP_ROLE)
-            user.groups.set([group])
             workspace = Workspace.objects.create(name=f"{user.username}'s Workspace")
-            workspace.members.add(user)
+            workspace.add_member(user, ROLE_ADMIN)
             user.save()
 
         if not user.is_active:
@@ -131,10 +127,8 @@ def github_login(request):
     )
     if created:
         user.set_unusable_password()
-        group, _ = Group.objects.get_or_create(name=settings.SIGNUP_ROLE)
-        user.groups.set([group])
         workspace = Workspace.objects.create(name=f"{user.username}'s Workspace")
-        workspace.members.add(user)
+        workspace.add_member(user, ROLE_ADMIN)
         user.save()
 
     if not user.is_active:

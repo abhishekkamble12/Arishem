@@ -44,41 +44,6 @@ class StorageKeyTests(TestCase):
             storage.resolve_local_path("../../outside.pdf")
 
 
-class RoleManagementTests(TestCase):
-
-    def setUp(self):
-        self.client = Client()
-        self.admin = _make_user("admin@test.com", "Pass1234!", "admin")
-        self.editor = _make_user("editor@test.com", "Pass1234!", "editor")
-        self.viewer = _make_user("viewer@test.com", "Pass1234!", "viewer")
-        self.admin_auth = {"HTTP_AUTHORIZATION": f"Bearer {_get_token(self.client, 'admin@test.com', 'Pass1234!')}"}
-        self.editor_auth = {"HTTP_AUTHORIZATION": f"Bearer {_get_token(self.client, 'editor@test.com', 'Pass1234!')}"}
-
-    def _set_role(self, user, role, auth):
-        return self.client.patch(
-            f"/app/auth/users/{user.id}/role", {"role": role},
-            content_type="application/json", **auth,
-        )
-
-    def test_admin_can_promote(self):
-        resp = self._set_role(self.viewer, "editor", self.admin_auth)
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(User.objects.get(id=self.viewer.id).role, "editor")
-
-    def test_non_admin_cannot_change_roles(self):
-        resp = self._set_role(self.viewer, "admin", self.editor_auth)
-        self.assertEqual(resp.status_code, 403)
-        self.assertEqual(User.objects.get(id=self.viewer.id).role, "viewer")
-
-    def test_admin_cannot_demote_self(self):
-        resp = self._set_role(self.admin, "viewer", self.admin_auth)
-        self.assertEqual(resp.status_code, 400)
-
-    def test_invalid_role_rejected(self):
-        resp = self._set_role(self.viewer, "superuser", self.admin_auth)
-        self.assertEqual(resp.status_code, 400)
-
-
 class IngestionIsolationTests(TestCase):
 
     def setUp(self):

@@ -6,7 +6,9 @@ Auth endpoints:
   POST /auth/login             — get JWT tokens (open)
   POST /auth/token/refresh     — refresh access token (open)
   GET  /auth/me                — current user info (authenticated)
-  PATCH /auth/users/<id>/role  — change a user's role [admin]
+  GET/POST /auth/workspaces    — list / create workspaces (creator becomes its admin)
+  GET/POST /auth/workspaces/<id>/members          — list / add members [admin to add]
+  PATCH/DELETE /auth/workspaces/<id>/members/<uid> — change role / remove [admin; members may leave]
 
 AI endpoints (all require JWT):
   POST /app/ai/upload          — ingest file from storage key [editor, admin]
@@ -26,7 +28,6 @@ from urllib.parse import parse_qs, urlparse
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.db import connection
 from django.utils import timezone
 from rest_framework import status
@@ -42,9 +43,25 @@ from Services.Ai_service.video_transcibing import SUPPORTED_MEDIA_EXTENSIONS
 from Services.storage import build_object_key, delete_object, is_key_in_workspace, save_upload
 
 from .metrics_service import get_workspace_monitoring_stats, log_prediction_and_check_drift
-from .models import ROLE_ADMIN, IngestedFile, MeetingAnalysis, PredictionLog, Workspace
-from .permissions import IsAdmin, IsAdminOrEditor, IsAnyRole
-from .serializers import RegisterSerializer, RoleUpdateSerializer, UserSerializer, WorkspaceSerializer
+from .models import (
+    EDIT_ROLES,
+    ROLE_ADMIN,
+    IngestedFile,
+    MeetingAnalysis,
+    Membership,
+    PredictionLog,
+    Workspace,
+)
+from .permissions import IsAnyRole
+from .serializers import (
+    MemberAddSerializer,
+    MemberSerializer,
+    RegisterSerializer,
+    RoleUpdateSerializer,
+    UserSerializer,
+    WorkspaceCreateSerializer,
+    WorkspaceSerializer,
+)
 from .tasks import run_ingestion_task, run_youtube_ingestion_task
 from .throttling import AuthRateThrottle, CostControlRoleThrottle
 from .utils import resolve_workspace
@@ -89,8 +106,8 @@ def register(request):
     """
     POST /auth/register
     Body: { "email": "...", "password": "...", "password2": "..." }
-    New accounts are always viewers; an admin promotes them via
-    PATCH /auth/users/<id>/role.
+    The new user becomes admin of their own personal workspace and has no access
+    to anyone else's until that workspace's admin adds them.
     """
     serializer = RegisterSerializer(data=request.data)
     if not serializer.is_valid():
@@ -160,31 +177,112 @@ def me(request):
     return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
 
 
-@api_view(["PATCH"])
-@permission_classes([IsAdmin])
-def set_user_role(request, user_id):
+def _admin_count(workspace_id: int) -> int:
+    return Membership.objects.filter(workspace_id=workspace_id, role=ROLE_ADMIN).count()
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAnyRole])
+def workspaces(request):
     """
-    PATCH /auth/users/<id>/role   [admin only]
-    Body: { "role": "viewer|editor|admin" }
+    GET  /auth/workspaces  — workspaces the caller belongs to, each with their role.
+    POST /auth/workspaces  — create a workspace (e.g. a project group); caller becomes its admin.
+                             Body: { "name": "Payments team" }
     """
-    serializer = RoleUpdateSerializer(data=request.data)
+    if request.method == "GET":
+        qs = request.user.workspaces.order_by("id")
+        return Response(WorkspaceSerializer(qs, many=True, context={"user": request.user}).data)
+
+    serializer = WorkspaceCreateSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    if request.user.memberships.filter(role=ROLE_ADMIN).count() >= settings.MAX_WORKSPACES_PER_USER:
+        return Response(
+            {"error": f"You can administer at most {settings.MAX_WORKSPACES_PER_USER} workspaces."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    workspace = Workspace.objects.create(name=serializer.validated_data["name"].strip())
+    workspace.add_member(request.user, ROLE_ADMIN)
+    return Response(
+        WorkspaceSerializer(workspace, context={"user": request.user}).data,
+        status=status.HTTP_201_CREATED,
+    )
 
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAnyRole])
+def workspace_members(request, workspace_id):
+    """
+    GET  /auth/workspaces/<id>/members  — any member can see who is in the workspace.
+    POST /auth/workspaces/<id>/members  — [admin] add an already-registered user.
+                                          Body: { "email": "...", "role": "viewer|editor|admin" }
+    """
+    if request.method == "GET":
+        wid, error = resolve_workspace(request, {"workspace_id": workspace_id})
+        if error:
+            return error
+        members = Membership.objects.filter(workspace_id=wid).select_related("user").order_by("id")
+        return Response(MemberSerializer(members, many=True).data)
+
+    wid, error = resolve_workspace(request, {"workspace_id": workspace_id}, roles=(ROLE_ADMIN,))
+    if error:
+        return error
+    serializer = MemberAddSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    email = serializer.validated_data["email"].strip().lower()
     try:
-        target = User.objects.get(id=user_id)
+        target = User.objects.get(email__iexact=email, is_active=True)
     except User.DoesNotExist:
-        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"error": "No account with that email. Ask them to sign up first, then add them."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    if Membership.objects.filter(workspace_id=wid, user=target).exists():
+        return Response({"error": "Already a member. Use PATCH to change their role."}, status=status.HTTP_409_CONFLICT)
+    membership = Workspace.objects.get(id=wid).add_member(target, serializer.validated_data["role"])
+    logger.info("%s added %s to workspace %s as %s", request.user.email, target.email, wid, membership.role)
+    return Response(MemberSerializer(membership).data, status=status.HTTP_201_CREATED)
 
-    new_role = serializer.validated_data["role"]
-    # Stop an admin from locking themselves out
-    if target.id == request.user.id and new_role != ROLE_ADMIN:
-        return Response({"error": "Admins cannot remove their own admin role"}, status=status.HTTP_400_BAD_REQUEST)
 
-    group, _ = Group.objects.get_or_create(name=new_role)
-    target.groups.set([group])
-    logger.info("User %s changed role of %s to %s", request.user.email, target.email, new_role)
-    return Response(UserSerializer(target).data, status=status.HTTP_200_OK)
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAnyRole])
+def workspace_member(request, workspace_id, user_id):
+    """
+    PATCH  /auth/workspaces/<id>/members/<user_id>  — [admin] change role. Body: { "role": "..." }
+    DELETE /auth/workspaces/<id>/members/<user_id>  — [admin] remove a member, or any member leaving.
+    A workspace always keeps at least one admin.
+    """
+    leaving = request.method == "DELETE" and user_id == request.user.id
+    wid, error = resolve_workspace(
+        request, {"workspace_id": workspace_id}, roles=None if leaving else (ROLE_ADMIN,)
+    )
+    if error:
+        return error
+    try:
+        membership = Membership.objects.select_related("user").get(workspace_id=wid, user_id=user_id)
+    except Membership.DoesNotExist:
+        return Response({"error": "Not a member of this workspace"}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "PATCH":
+        serializer = RoleUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        new_role = serializer.validated_data["role"]
+        if membership.role == ROLE_ADMIN and new_role != ROLE_ADMIN and _admin_count(wid) <= 1:
+            return Response({"error": "A workspace needs at least one admin."}, status=status.HTTP_400_BAD_REQUEST)
+        membership.role = new_role
+        membership.save(update_fields=["role"])
+        logger.info("%s set %s to %s in workspace %s", request.user.email, membership.user.email, new_role, wid)
+        return Response(MemberSerializer(membership).data)
+
+    if membership.role == ROLE_ADMIN and _admin_count(wid) <= 1:
+        return Response(
+            {"error": "The last admin cannot leave. Promote someone else first."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    membership.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,7 +378,7 @@ def _run_ingestion(s3_key: str, user, workspace_id: int, original_filename: str 
 # ─────────────────────────────────────────────────────────────────────────────
 
 @api_view(["POST"])
-@permission_classes([IsAdminOrEditor])
+@permission_classes([IsAnyRole])
 @throttle_classes([CostControlRoleThrottle])
 def store_vectordb(request):
     """
@@ -292,7 +390,7 @@ def store_vectordb(request):
     if not s3_key:
         return Response({"error": "s3_key is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    workspace_id, error_response = resolve_workspace(request, request.data)
+    workspace_id, error_response = resolve_workspace(request, request.data, roles=EDIT_ROLES)
     if error_response:
         return error_response
 
@@ -305,7 +403,7 @@ def store_vectordb(request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @api_view(["POST"])
-@permission_classes([IsAdminOrEditor])
+@permission_classes([IsAnyRole])
 @parser_classes([MultiPartParser])
 @throttle_classes([CostControlRoleThrottle])
 def upload_direct(request):
@@ -336,7 +434,7 @@ def upload_direct(request):
         )
 
     # Authorise the workspace BEFORE writing anything to storage
-    workspace_id, error_response = resolve_workspace(request, request.data)
+    workspace_id, error_response = resolve_workspace(request, request.data, roles=EDIT_ROLES)
     if error_response:
         return error_response
 
@@ -390,15 +488,16 @@ def query_vectordb(request):
             )
         kwargs["top_k"] = top_k
 
-    # Daily per-user cap on LLM-backed queries. Admins are exempt.
-    if not request.user.has_role(ROLE_ADMIN):
-        day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        used_today = PredictionLog.objects.filter(user=request.user, timestamp__gte=day_start).count()
-        if used_today >= settings.DAILY_QUERY_QUOTA:
-            return Response(
-                {"error": f"Daily query limit reached ({settings.DAILY_QUERY_QUOTA}). Try again tomorrow."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
+    # Daily per-user cap on LLM-backed queries. No role is exempt: every sign-up is
+    # admin of their own workspace, so an exemption would be an open cost hole.
+    user_role = request.user.role_in(workspace_id)
+    day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    used_today = PredictionLog.objects.filter(user=request.user, timestamp__gte=day_start).count()
+    if used_today >= settings.DAILY_QUERY_QUOTA:
+        return Response(
+            {"error": f"Daily query limit reached ({settings.DAILY_QUERY_QUOTA}). Try again tomorrow."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
 
     start_time = time.time()
     error_msg = None
@@ -408,7 +507,7 @@ def query_vectordb(request):
             question,
             workspace_id=workspace_id,
             user_email=request.user.email,
-            user_role=request.user.role,
+            user_role=user_role,
             **kwargs
         )
     except Exception as e:
@@ -470,7 +569,7 @@ def list_files(request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @api_view(["DELETE"])
-@permission_classes([IsAdminOrEditor])
+@permission_classes([IsAnyRole])
 def delete_file(request):
     """
     DELETE /app/ai/files/delete
@@ -487,7 +586,10 @@ def delete_file(request):
 
     # Only search the caller's own workspaces: another tenant's file looks
     # exactly like a file that doesn't exist.
-    files = IngestedFile.objects.filter(workspace__in=request.user.workspaces.all())
+    # and only workspaces where they are an editor or admin may delete.
+    files = IngestedFile.objects.filter(
+        workspace__memberships__user=request.user, workspace__memberships__role__in=EDIT_ROLES
+    )
     try:
         file_obj = files.get(id=int(file_id)) if file_id else files.get(object_key=s3_key)
     except (IngestedFile.DoesNotExist, ValueError, TypeError):
@@ -533,34 +635,18 @@ def check_task_status(request, task_id):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTH — GET /app/auth/workspaces   [all authenticated users]
+# AI — GET /app/ai/monitoring   [workspace editor, admin only]
 # ─────────────────────────────────────────────────────────────────────────────
 
 @api_view(["GET"])
 @permission_classes([IsAnyRole])
-def list_workspaces(request):
-    """
-    GET /app/auth/workspaces
-    Lists all workspaces the authenticated user belongs to.
-    """
-    workspaces = request.user.workspaces.all()
-    serializer = WorkspaceSerializer(workspaces, many=True)
-    return Response(serializer.data, status=status.HTTP_200_OK)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AI — GET /app/ai/monitoring   [editor, admin only]
-# ─────────────────────────────────────────────────────────────────────────────
-
-@api_view(["GET"])
-@permission_classes([IsAdminOrEditor])
 def get_monitoring_stats(request):
     """
     GET /app/ai/monitoring
     Query params: workspace_id=1
     Returns aggregated metrics for the dashboard.
     """
-    workspace_id, error_response = resolve_workspace(request, request.query_params)
+    workspace_id, error_response = resolve_workspace(request, request.query_params, roles=EDIT_ROLES)
     if error_response:
         return error_response
 
@@ -579,7 +665,7 @@ def _youtube_video_id(parsed) -> str:
 
 
 @api_view(["POST"])
-@permission_classes([IsAdminOrEditor])
+@permission_classes([IsAnyRole])
 @throttle_classes([CostControlRoleThrottle])
 def ingest_youtube(request):
     """
@@ -597,7 +683,7 @@ def ingest_youtube(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    workspace_id, error_resp = resolve_workspace(request, request.data)
+    workspace_id, error_resp = resolve_workspace(request, request.data, roles=EDIT_ROLES)
     if error_resp:
         return error_resp
 
