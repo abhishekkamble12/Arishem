@@ -257,6 +257,9 @@ MAX_WORKSPACES_PER_USER = config("MAX_WORKSPACES_PER_USER", default=5, cast=int)
 # Deliberately 0.0 by default: the rates belong to whoever runs this and change
 # without notice, so the monitoring endpoint reports $0.00 until they are set
 # rather than showing a number this project invented.
+# Shared with Services/agent.py, which reads the same variable: the refusal
+# threshold and the drift check must not disagree about what "low" means.
+RAG_CONFIDENCE_THRESHOLD = config("RAG_CONFIDENCE_THRESHOLD", default=0.065, cast=float)
 LLM_INPUT_COST_PER_MTOK = config("LLM_INPUT_COST_PER_MTOK", default=0.0, cast=float)
 LLM_OUTPUT_COST_PER_MTOK = config("LLM_OUTPUT_COST_PER_MTOK", default=0.0, cast=float)
 MAX_QUESTION_CHARS = config("MAX_QUESTION_CHARS", default=1000, cast=int)

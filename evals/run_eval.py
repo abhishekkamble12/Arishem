@@ -38,7 +38,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
 
 # ── Eval configuration (recorded in the scorecard so results are reproducible)
-CONFIDENCE_THRESHOLD = 0.35
+# Default to whatever the application uses, so the two cannot drift apart.
+CONFIDENCE_THRESHOLD = float(os.getenv("EVAL_CONFIDENCE_THRESHOLD", agent_mod.CONFIDENCE_THRESHOLD))
 TOP_K = agent_mod.TOP_K
 # Mirrors Services/Extractor.py — kept local because importing it requires Django
 CHUNK_SIZE, CHUNK_OVERLAP = 800, 150
@@ -113,6 +114,45 @@ def setup_qdrant(docs):
     vector_store.add_documents(docs)
     print(f"Added {len(docs)} chunks to Qdrant.")
 
+REFUSAL_GROUND_TRUTH = "I don't have enough information to answer that."
+
+
+def is_answerable(item) -> bool:
+    """
+    Whether the corpus should be able to answer this question. Explicit
+    "answerable" wins; otherwise a ground truth that is itself a refusal marks
+    the question as a negative example.
+    """
+    if "answerable" in item:
+        return bool(item["answerable"])
+    return item["ground_truth"].strip().lower() != REFUSAL_GROUND_TRUTH.lower()
+
+
+def threshold_sweep(per_question):
+    """
+    What the refusal threshold would have done, at every value, from one run.
+
+    Retrieval confidence does not depend on the threshold, so the whole curve
+    comes out of a single pass. This is the calibration the default was missing.
+    """
+    answerable = [q for q in per_question if q["answerable"]]
+    unanswerable = [q for q in per_question if not q["answerable"]]
+    rows = []
+    for threshold in [round(0.02 * i, 2) for i in range(1, 11)] + [0.25, 0.30, 0.35, 0.40]:
+        # A question is refused when its confidence falls below the threshold.
+        wrongly_refused = sum(1 for q in answerable if (q["confidence"] or 0) < threshold)
+        wrongly_answered = sum(1 for q in unanswerable if (q["confidence"] or 0) >= threshold)
+        rows.append({
+            "threshold": threshold,
+            "answerable_refused": wrongly_refused,
+            "answerable_total": len(answerable),
+            "unanswerable_answered": wrongly_answered,
+            "unanswerable_total": len(unanswerable),
+            "mistakes": wrongly_refused + wrongly_answered,
+        })
+    return rows
+
+
 def write_outputs(results, per_question, n_golden):
     """Write SCORECARD.md (summary) and eval_results.json (raw, per question)."""
     import datetime
@@ -135,13 +175,16 @@ def write_outputs(results, per_question, n_golden):
         "answered_without_error": len(per_question),
         "embedding_model": "all-MiniLM-L6-v2 (384-dim, local)",
         "llm": agent_mod.GROQ_MODEL,
-        "judge_llm": "llama-3.3-70b-versatile (Groq)",
+        "judge_llm": f"{JUDGE_MODEL} (Groq)",
         "agentic_mode": agent_mod.AGENTIC_MODE,
         "top_k": TOP_K,
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
         "confidence_threshold": CONFIDENCE_THRESHOLD,
     }
+
+    sweep = threshold_sweep(per_question)
+    config["threshold_sweep"] = sweep
 
     with open(os.path.join(EVAL_DIR, "eval_results.json"), "w", encoding="utf-8") as f:
         json.dump({"config": config, "questions": per_question}, f, indent=2, default=str)
@@ -166,12 +209,33 @@ def write_outputs(results, per_question, n_golden):
         lines.append(f"- Query latency: median {statistics.median(latencies):.0f} ms, p95 {p95} ms "
                      "(includes LLM calls; local in-memory Qdrant)")
 
+    best = min(sweep, key=lambda r: (r["mistakes"], -r["threshold"]))
+    lines += [
+        "", "## Refusal threshold sweep", "",
+        "Retrieval confidence does not depend on the threshold, so this whole table "
+        "comes from the single run above. 'Wrongly refused' is an answerable question "
+        "the threshold would reject; 'wrongly answered' is an unanswerable one it "
+        "would let through.",
+        "",
+        "| Threshold | Wrongly refused | Wrongly answered | Total mistakes |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in sweep:
+        marker = "  <- fewest mistakes" if row is best else ""
+        lines.append(
+            f"| `{row['threshold']:.2f}` | {row['answerable_refused']}/{row['answerable_total']} "
+            f"| {row['unanswerable_answered']}/{row['unanswerable_total']} | {row['mistakes']}{marker} |"
+        )
+
     lines += ["", "## Configuration", ""]
-    lines += [f"- **{key}**: {value}" for key, value in config.items()]
+    lines += [f"- **{key}**: {value}" for key, value in config.items() if key != "threshold_sweep"]
     lines += [
         "", "## Caveats", "",
         "- Small golden set; treat differences under ~0.05 as noise.",
         "- The judge is the same model family as the generator, which can inflate scores.",
+        "- The sweep's best threshold is fitted on this set. With few negative examples "
+        "it is a starting point, not a calibration; add unanswerable questions before "
+        "trusting a precise value.",
     ]
 
     with open(os.path.join(EVAL_DIR, "SCORECARD.md"), "w", encoding="utf-8") as f:
@@ -261,6 +325,7 @@ async def main():
             per_question.append({
                 "question": question,
                 "ground_truth": gt,
+                "answerable": is_answerable(item),
                 "answer": answer,
                 "confidence": res.get("confidence"),
                 "refused": not res.get("sources"),

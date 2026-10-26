@@ -38,7 +38,7 @@ def _check_for_drift(workspace_id):
     recent_logs = list(PredictionLog.objects.filter(workspace_id=workspace_id, confidence__isnull=False).order_by('-id')[:50])
     if len(recent_logs) >= 50:
         avg_confidence = sum(log.confidence for log in recent_logs) / 50.0
-        if avg_confidence < 0.35:
+        if avg_confidence < settings.RAG_CONFIDENCE_THRESHOLD:
             recent_drift = DriftLog.objects.filter(workspace_id=workspace_id, timestamp__gte=timezone.now() - timedelta(hours=1)).exists()
             if not recent_drift:
                 DriftLog.objects.create(

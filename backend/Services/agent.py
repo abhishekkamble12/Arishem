@@ -35,7 +35,14 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 TOP_K                = int(config("RAG_TOP_K", default=5))
-CONFIDENCE_THRESHOLD = float(config("RAG_CONFIDENCE_THRESHOLD", default=0.35))
+# Calibrated against the 30-question golden set on 2026-10-26 (see
+# evals/SCORECARD.md). On that set, questions the corpus can answer scored
+# 0.0719-0.3761 and questions it cannot scored -0.0033-0.0585, so any value in
+# between separates them; 0.065 is the midpoint of that band. The previous 0.35
+# was inherited from a retired embedding model and refused 27 of 28 answerable
+# questions, which made the product look broken. Two negative examples is thin
+# evidence, so widen the golden set before trusting a more precise value.
+CONFIDENCE_THRESHOLD = float(config("RAG_CONFIDENCE_THRESHOLD", default=0.065))
 # Groq retires models on a few months' notice; GET /openai/v1/models lists what is
 # live. Both defaults below were checked against that list.
 GROQ_MODEL           = config("GROQ_MODEL_ID", default="openai/gpt-oss-20b")

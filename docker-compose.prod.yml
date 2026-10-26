@@ -30,6 +30,11 @@ x-app: &app
     # Empty is fine: /auth/google then answers 503 instead of verifying tokens
     # against an empty audience.
     GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    # USD per million tokens, for costing the recorded usage. These default to 0
+    # rather than empty because settings casts them to float, and float("") raises
+    # at import — an empty value here would stop the container from starting.
+    LLM_INPUT_COST_PER_MTOK: ${LLM_INPUT_COST_PER_MTOK:-0}
+    LLM_OUTPUT_COST_PER_MTOK: ${LLM_OUTPUT_COST_PER_MTOK:-0}
   depends_on: &app-deps
     postgres: {condition: service_healthy}
     redis: {condition: service_healthy}
