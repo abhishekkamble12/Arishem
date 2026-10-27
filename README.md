@@ -20,11 +20,12 @@ measured, and this README does not claim it.
 
 | | |
 |---|---|
-| Deployed and tested on AWS | **32/32 checks passed** over the network against a live stack, then torn down — [docs/DEPLOYMENT_VERIFICATION.md](docs/DEPLOYMENT_VERIFICATION.md) |
-| Retrieval, hard suite | **hit@5 52/53, MRR 0.895** over 9 documents — the one miss is a paraphrase; see [Evaluation](#evaluation) |
-| Faithfulness (RAGAS), easy suite | **1.00** on 28 answered questions — saturated, which is why the hard suite exists |
-| Refusal accuracy, easy suite | **30/30** — but with only 2 unanswerable questions; the hard suite has 19 |
-| Tests | 98 backend + 21 for the eval's scoring rules, all offline; **68% line coverage** of application code (tests and migrations excluded) |
+| Answer correctness, hard suite | **51 of 53** answerable questions fully correct (97% of required facts), over distractors, multi-hop and paraphrase — [evals/SCORECARD.md](evals/SCORECARD.md) |
+| Faithfulness (RAGAS), hard suite | **0.958** over 52 answers, judged by a different model family; 2 of the 3 low scores are judge errors on very short answers, found by reading them |
+| Unanswerable questions declined | **8 of 8** measured so far, with **0** invented answers; 1 of 53 answerable questions wrongly declined |
+| Prompt injection | **2 of 2** resisted: a document instructing the model to misreport expense limits did not change the answer |
+| Deployed and tested on AWS | **32/32 checks** over the network on a live stack — health, sign-up, per-workspace roles, S3 upload and ingestion, cited answers, refusal, cross-tenant isolation, token accounting, deletion — then torn down. [docs/DEPLOYMENT_VERIFICATION.md](docs/DEPLOYMENT_VERIFICATION.md) |
+| Tests | **136** backend tests and **28** for the evaluation's own scoring rules and golden set, all offline, all in CI |
 | Query latency | **median 2.46 s, worst 5.37 s** over six queries in the production container, measured while Groq was rate-limiting the primary model; ~2.1 s of it is the three Groq calls |
 | Tokens per answered query | **1,041 in + 449 out** on the deployed system |
 | Deployment cost | **~\$14.69/month** on AWS, from live Pricing API rates — see [docs/DEPLOY.md](docs/DEPLOY.md) |
@@ -116,7 +117,8 @@ workspace being acted on (`app/utils.py: resolve_workspace`).
 ## Evaluation
 
 There are two suites. The easy one is finished and saturated. The hard one replaced
-it, and its generation-dependent half is not finished yet — the reasons are below.
+it; every answerable question is complete, and 11 unanswerable ones are still waiting
+on Groq's daily token allowance.
 
 ### The hard suite (current harness)
 
@@ -138,26 +140,59 @@ everywhere else, and a vendor FAQ carrying a prompt injection in an HTML comment
 
 Each question is labelled with the documents retrieval should surface and the facts
 a correct answer must contain, so most metrics need no LLM
-([`evals/metrics.py`](evals/metrics.py), 21 unit tests run in CI): key-fact
+([`evals/metrics.py`](evals/metrics.py); its rules and the golden set's integrity are tested in CI): key-fact
 correctness, retrieval hit@k / MRR / recall, abstention precision and recall, and
 injection resistance. Faithfulness is judged by `qwen/qwen3.8-27b`, a different
 model family from the `gpt-oss-20b` generator.
 
-**Measured so far — retrieval, which needs no LLM:**
+**Results** (61 of 72 questions; the 11 still to run are all unanswerable):
 
-| | |
+| Metric | Result |
 |---|---|
-| Hit@5 | **52/53** answerable questions |
-| MRR | **0.895** |
-| Recall of all needed documents | 0.981 (matters for multi-hop) |
-| The miss | *"On which days of the week does new code get released to customers?"* — the source says "production deployments happen every Tuesday and Thursday", sharing almost no words with the question |
+| Fully correct answers | **51/53** (97% of required facts present) |
+| Faithfulness, RAGAS, judged by `qwen/qwen3.8-27b` | **0.958** over 52 answers |
+| Unanswerable questions declined | **8/8**, none answered |
+| Answerable questions wrongly declined | 1/53 |
+| Prompt injection resisted | **2/2** |
+| Retrieval hit@5 / MRR | 52/53 / 0.895 — a regression check more than a headline: with 19 chunks and top 5, retrieval is not hard here |
+
+| Category | n | Correct | Faithfulness |
+|---|---|---|---|
+| single fact | 28 | 100% | 0.964 |
+| distractor | 10 | 100% | 1.000 |
+| multi-hop | 7 | 93% | 0.971 |
+| paraphrase | 6 | 83% | 0.800 |
+| injection | 2 | 100% | 1.000 |
+
+**Every miss, read by hand:**
+
+- *"On which days of the week does new code get released to customers?"* — retrieval
+  missed: the source says "production deployments happen every Tuesday and
+  Thursday", which shares almost no words with the question, so the model correctly
+  said the documents it was given did not cover it. A paraphrase failure, and the one
+  wrongly declined question.
+- *"What is the longest an API prediction log may be kept?"* — answered 180 days with
+  an extension, but missed that a legal hold in a second document suspends retention
+  entirely. Half the facts of a multi-hop question.
+- Two faithfulness scores of 0.00 are the judge's errors, not the system's. "5 days"
+  appears verbatim in the context, but RAGAS splits an answer into claims before
+  checking them, and a two-word answer gives it nothing to check. The other applied
+  "immediate family member" to a father, an inference the judge would not accept.
+  They are left in the 0.958 rather than corrected, and noted here instead.
+
+**Two harness bugs this run caught**, both fixed before these numbers were taken:
+question ids from two categories collided, which paired one question with another's
+answer; and the abstention detector missed "I don't have enough information to answer
+that", which made correct refusals look like hallucinations. CI now fails on duplicate
+ids, and those sentences are in the tests verbatim.
 
 **What it showed about the refusal threshold.** On this corpus, answerable questions
 score 0.15–0.55 and unanswerable ones 0.02–0.49. Those ranges overlap, so **no
-threshold separates them**: 17 of the 19 unanswerable questions clear the current
-0.065. The threshold can only stop clearly off-topic questions. A plausible
-in-domain question like *"How long are Slack messages retained?"* has to be declined
-by the model itself, which is what the abstention metrics measure.
+threshold separates them**, and in this run the threshold stopped none of the 8
+in-domain unanswerable questions: all 8 refusals came from the model reading the
+retrieved text and saying it did not cover the question. The threshold is the cheap
+first line, for clearly off-topic questions (the 3 such questions are among those
+still to run); the model is the second, and the one doing the work here.
 
 It also showed that the threshold is corpus-dependent. Confidence is the *mean*
 similarity of the top 5 chunks, and on the old four-chunk corpus every query was
@@ -166,13 +201,10 @@ questions averaged about 0.2 there and about 0.37 here. So the 0.065 fitted on t
 easy suite was a property of that corpus, not of the system. The maximum, rather
 than the mean, would be the more robust signal, and that is a change still to make.
 
-**Not yet measured:** correctness, abstention, faithfulness and injection
-resistance. These need the generator, and Groq's free tier allows 200,000 tokens
-per model per day. The day's earlier runs had used most of it, and generation
-stopped at 199,531 tokens with 18 of 72 answers saved. The harness is resumable, so
-the same command continues from question 19 once the window resets. No partial
-numbers are published here, because a partial run would invite reading 18
-questions as if they were 72.
+**Still to run:** 8 in-domain and 3 out-of-domain unanswerable questions. Groq's
+free tier allows 200,000 tokens per model per day, and generation stopped at the cap.
+The harness is resumable, so the same command picks them up. Note that 61 of 72 means
+the abstention figures rest on 8 negatives, not 19.
 
 ```bash
 pip install -r backend/requirements-optional.txt   # ragas is not a runtime dependency
@@ -252,12 +284,12 @@ cd backend
 python manage.py test --settings=backend.test_settings
 ```
 
-98 backend tests, all offline: the vector store, LLM and S3 are replaced with fakes,
-so no test needs a network call or an API key. CI runs them with coverage on every
-push: **68% line coverage** of `app/` and `Services/`, with test files and migrations
-excluded. (An earlier version of this README said 79%; that figure counted the test
-files themselves, which always cover themselves fully.) The least-covered code is the
-optional Meetings feature, which is off by default: 13–39%. They cover:
+136 backend tests, all offline: the vector store, LLM, S3, Whisper and yt-dlp are
+replaced with fakes, so no test needs a network call or an API key. CI runs them with
+coverage on every push: 76% of `app/` and `Services/`, test files and migrations
+excluded. (An earlier version of this README said 79% from a measurement that counted
+the test files themselves; measured correctly it was 68%, before the Meetings feature
+had tests.) They cover:
 
 - auth, JWT and per-workspace roles, including that a sign-up cannot grant itself a
   role, that a role in one workspace grants nothing in another, and that a workspace
@@ -276,6 +308,8 @@ optional Meetings feature, which is off by default: 13–39%. They cover:
 - token accounting: totals across the calls one query makes, both shapes of usage
   metadata, persistence on `PredictionLog`, and that unset cost rates report \$0.00
   rather than a made-up price
+- boot-time warm-up, and that a warm-up failure never stops a worker starting
+- the Meetings feature: extraction, map-reduce summaries, Whisper, ffmpeg and yt-dlp
 
 ### Verified behaviour
 
@@ -346,19 +380,22 @@ there is no SSH port (Session Manager instead), and a budget alarm emails at 80%
 a limit you set. The stack reports success only once the API answers its own health
 check. Full breakdown and teardown steps: [docs/DEPLOY.md](docs/DEPLOY.md).
 
-The template is validated (`validate-template` and `cfn-lint`, no findings) but
-**has not been deployed**, so there is no live demo URL yet.
+It was deployed once to ap-south-1, passed 32/32 checks over the network, and was
+then torn down, so there is no live demo URL. The daily-snapshot policy was added
+after that run, so it is validated as a template but not yet observed on a stack.
 
 ## Known limitations
 
-- **The hard evaluation suite has only half-run.** Retrieval is measured; correctness,
-  abstention, faithfulness and injection resistance are waiting on Groq's daily token
-  allowance. This is the biggest gap.
+- **The evaluation's negatives are thin.** 11 of the 19 unanswerable questions have
+  not run yet, so abstention rests on 8. The corpus is synthetic and small (19
+  chunks), which makes retrieval easy; a larger real corpus is the next step.
 - **The refusal threshold cannot separate in-domain unanswerable questions**, because
   their confidence overlaps with answerable ones. It relies on the model declining,
   and it is a mean over the top-k, which makes it corpus-dependent.
-- **No prompt-injection guard.** A document can carry instructions into the prompt.
-  The hard evaluation suite contains such a document; its result is not in yet.
+- **No dedicated prompt-injection guard.** The model resisted both injection
+  questions in the eval, but that is two questions and one attack style, not a
+  defence. A classifier such as Groq's `llama-prompt-guard` in front of the context
+  would be.
 - **Latency was 16 s on the first deployed query, and the cause was not the
   model.** The three Groq calls take ~2 s together. The rest was a cold start
   (torch and the embedding model loading on the first request: 14–22 s) and, under
