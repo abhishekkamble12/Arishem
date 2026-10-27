@@ -10,13 +10,16 @@ Extracts:
 import json
 import logging
 
-from decouple import config
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
+# The model and its reliability settings come from the RAG agent, so there is one
+# place to change them. This module used to default to llama-3.3-70b-versatile on
+# its own; Groq retired that model, which left the whole Meetings feature failing.
+from Services.agent import GROQ_MODEL, LLM_MAX_RETRIES, LLM_TIMEOUT_SECONDS
+
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = config("GROQ_MODEL_ID", default="llama-3.3-70b-versatile")
 _llm = None
 
 
@@ -27,6 +30,8 @@ def _get_llm() -> ChatGroq:
             model=GROQ_MODEL,
             temperature=0.1,
             max_tokens=2048,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=LLM_MAX_RETRIES,
             model_kwargs={"response_format": {"type": "json_object"}},
         )
     return _llm
