@@ -53,6 +53,7 @@ interface MonitoringStats {
   prompt_tokens: number;
   completion_tokens: number;
   refused_queries: number;
+  cache_hits: number;        // answered from the answer cache: no LLM call
   estimated_cost_usd: number;
   cost_rates_configured: boolean;
 }
@@ -198,6 +199,8 @@ export default function MonitoringPage() {
   };
 
   const answered = stats.total_predictions - stats.refused_queries;
+  const cacheShare =
+    stats.total_predictions > 0 ? Math.round((100 * stats.cache_hits) / stats.total_predictions) : 0;
   const tokensPerQuery =
     stats.total_predictions > 0
       ? Math.round((stats.prompt_tokens + stats.completion_tokens) / stats.total_predictions)
@@ -266,7 +269,8 @@ export default function MonitoringPage() {
           <Coins className="w-4 h-4 text-emerald-400" />
           <span>LLM usage and cost</span>
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <MiniStat label="Answered from cache" value={`${stats.cache_hits.toLocaleString()} (${cacheShare}%)`} />
           <MiniStat label="LLM calls" value={stats.llm_calls.toLocaleString()} />
           <MiniStat label="Prompt tokens" value={stats.prompt_tokens.toLocaleString()} />
           <MiniStat label="Completion tokens" value={stats.completion_tokens.toLocaleString()} />
@@ -280,6 +284,8 @@ export default function MonitoringPage() {
             <span className="font-mono">LLM_OUTPUT_COST_PER_MTOK</span> on the server to turn these token counts into a price.</>
           )}{" "}
           A refused query skips synthesis and self-critique, so it costs a fraction of an answered one.
+          A question this workspace has already asked, against the same documents, is answered from
+          the cache with no LLM call at all.
         </p>
       </div>
     </div>

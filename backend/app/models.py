@@ -50,6 +50,9 @@ class Workspace(models.Model):
     name = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
     members = models.ManyToManyField("User", through="Membership", related_name="workspaces")
+    # Incremented whenever the workspace's documents change; cached answers are
+    # keyed on it, so they stop matching the moment the corpus does (answer_cache).
+    corpus_version = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return self.name
@@ -178,6 +181,8 @@ class IngestedFile(models.Model):
         default='SUCCESS'
     )
     error_message  = models.TextField(blank=True, null=True)
+    # Deliveries of the ingestion task so far; see MAX_INGESTION_ATTEMPTS.
+    attempts       = models.PositiveSmallIntegerField(default=0)
     uploaded_by    = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -222,6 +227,8 @@ class PredictionLog(models.Model):
     prompt_tokens = models.PositiveIntegerField(default=0)
     completion_tokens = models.PositiveIntegerField(default=0)
     refused = models.BooleanField(default=False)
+    # Served from the answer cache: no retrieval, no LLM call, no quota used.
+    cache_hit = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-timestamp"]

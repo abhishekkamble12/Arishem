@@ -4,11 +4,13 @@ from django.conf import settings
 from django.db.models import Avg, Sum
 from django.utils import timezone
 
+from . import observability
 from .alerting import send_drift_alert
 from .models import ROLE_ADMIN, DriftLog, PredictionLog, Workspace
 
 
-def log_prediction_and_check_drift(workspace_id, user, question, result, response_time_ms, error_msg=None):
+def log_prediction_and_check_drift(workspace_id, user, question, result, response_time_ms, error_msg=None,
+                                   cache_hit=False):
     """
     Logs the RAG prediction and synchronously checks for drift.
     (Ideally, the drift checking should be moved to a Celery task).
@@ -29,9 +31,16 @@ def log_prediction_and_check_drift(workspace_id, user, question, result, respons
         llm_calls=usage.get("llm_calls", 0),
         prompt_tokens=usage.get("prompt_tokens", 0),
         completion_tokens=usage.get("completion_tokens", 0),
+        cache_hit=cache_hit,
+    )
+    observability.record_query(
+        response_time_ms, error=error_msg is not None, cache_hit=cache_hit,
+        tokens=usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
     )
 
-    if error_msg is None:
+    # A cache hit repeats an earlier confidence; counting it again would let one
+    # popular question dominate the drift window.
+    if error_msg is None and not cache_hit:
         _check_for_drift(workspace_id)
 
 def _check_for_drift(workspace_id):
@@ -100,6 +109,7 @@ def get_workspace_monitoring_stats(workspace_id):
     # Refusals skip synthesis and self-critique. In agentic mode the decomposition
     # call has already happened, so this is a large saving, not a free one.
     refused = predictions.filter(refused=True).count()
+    cache_hits = predictions.filter(cache_hit=True).count()
 
     return {
         "total_predictions": total_predictions,
@@ -116,4 +126,5 @@ def get_workspace_monitoring_stats(workspace_id):
             settings.LLM_INPUT_COST_PER_MTOK or settings.LLM_OUTPUT_COST_PER_MTOK
         ),
         "refused_queries": refused,
+        "cache_hits": cache_hits,
     }

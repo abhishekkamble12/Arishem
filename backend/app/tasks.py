@@ -3,10 +3,12 @@ import logging
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db.models import F
 from django.utils import timezone
 from Services.Ai_service.embedding import delete_file_vectors, embed_and_store
 from Services.Extractor import extract_and_chunk
 
+from .answer_cache import bump_corpus_version
 from .models import IngestedFile, Workspace
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,21 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         logger.info("File #%d already ingested; skipping duplicate task", file_id)
         return f"Already ingested ({ingested_file.chunks_stored} chunks)"
 
+    # Count this delivery. Tasks are acknowledged late (see settings), so a worker
+    # killed mid-task gets the message back; without a cap, a document that kills
+    # the worker every time would be retried forever.
+    IngestedFile.objects.filter(id=file_id).update(attempts=F("attempts") + 1)
+    ingested_file.refresh_from_db(fields=["attempts"])
+    if ingested_file.attempts > settings.MAX_INGESTION_ATTEMPTS:
+        logger.error("File #%d: giving up after %d attempts", file_id, ingested_file.attempts - 1)
+        ingested_file.status = 'FAILED'
+        ingested_file.error_message = (
+            f"Gave up after {settings.MAX_INGESTION_ATTEMPTS} attempts: the worker stopped "
+            f"part-way through each one, which usually means the file needs more memory than it has."
+        )
+        ingested_file.save(update_fields=["status", "error_message"])
+        return "Gave up"
+
     # Update status to PROCESSING
     ingested_file.status = 'PROCESSING'
     ingested_file.error_message = None
@@ -65,6 +82,8 @@ def run_ingestion_task(self, s3_key: str, user_id: int, workspace_id: int, file_
         ingested_file.status = 'SUCCESS'
         ingested_file.last_indexed_timestamp = timezone.now()
         ingested_file.save()
+        # New evidence can change an answer, including turning a refusal into one.
+        bump_corpus_version(workspace.id)
         logger.info("Successfully ingested '%s' via task", s3_key)
 
         # Trigger meeting intelligence analysis if audio/video or meeting category
@@ -207,6 +226,11 @@ def reconcile_stuck_ingestions():
     """
     Reconciliation job to resolve the dual-write consistency problem.
     Finds any file stuck in PENDING/PROCESSING for over 30 minutes and marks it as FAILED.
+
+    The last line of defence, not the first: a worker process killed mid-task has
+    its message redelivered at once (late acknowledgement, see settings), and a
+    whole worker lost has it returned by Redis after the visibility timeout. This
+    catches whatever neither path recovers, so no file says "processing" forever.
     """
     from datetime import timedelta
 
@@ -225,3 +249,19 @@ def reconcile_stuck_ingestions():
             f.save()
 
     return f"Reconciled {count} records."
+
+
+@shared_task
+def publish_queue_metrics():
+    """
+    Publish how much ingestion work is waiting, and how long the oldest item has
+    waited. A growing age with a flat count means the worker has stopped making
+    progress, which a count alone cannot show.
+    """
+    from . import observability
+
+    in_flight = IngestedFile.objects.filter(status__in=['PENDING', 'PROCESSING'])
+    oldest = in_flight.order_by("ingested_at").values_list("ingested_at", flat=True).first()
+    age = (timezone.now() - oldest).total_seconds() if oldest else 0.0
+    observability.record_ingestion_queue(in_flight.count(), age)
+    return in_flight.count()

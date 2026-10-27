@@ -171,6 +171,44 @@ class IngestionTaskTests(TestCase):
 
         mock_extract.assert_not_called()
 
+    @patch("app.tasks.delete_file_vectors")
+    @patch("app.tasks.embed_and_store", return_value=1)
+    @patch("app.tasks.extract_and_chunk", return_value=[Document(page_content="a", metadata={})])
+    def test_each_delivery_is_counted(self, *_mocks):
+        self._run()
+
+        self.file.refresh_from_db()
+        self.assertEqual(self.file.attempts, 1)
+
+    @patch("app.tasks.extract_and_chunk")
+    def test_a_file_that_keeps_crashing_the_worker_is_given_up_on(self, mock_extract):
+        # Three earlier deliveries never finished: the worker died each time, so
+        # the message kept coming back. The fourth must stop the loop.
+        self.file.status, self.file.attempts = "PROCESSING", 3
+        self.file.save()
+
+        with self.settings(MAX_INGESTION_ATTEMPTS=3):
+            self._run()
+
+        self.file.refresh_from_db()
+        self.assertEqual(self.file.status, "FAILED")
+        self.assertIn("3 attempts", self.file.error_message)
+        mock_extract.assert_not_called()
+
+
+class DeliveryGuaranteeTests(TestCase):
+    """
+    The settings that stop a killed worker losing its task. Celery's defaults
+    acknowledge on arrival, so dropping either line would bring that back silently.
+    """
+
+    def test_tasks_are_acknowledged_after_they_finish(self):
+        from backend.celery import app
+
+        self.assertTrue(app.conf.task_acks_late)
+        self.assertTrue(app.conf.task_reject_on_worker_lost)
+        self.assertEqual(app.conf.worker_prefetch_multiplier, 1)
+
 
 class ReconciliationTests(TestCase):
 
