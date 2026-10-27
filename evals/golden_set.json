@@ -1027,21 +1027,21 @@
     "answerable": false
   },
   {
-    "id": "unan-01",
+    "id": "ood-01",
     "category": "unanswerable_out_of_domain",
     "question": "What is the capital of France?",
     "ground_truth": "I don't have enough information to answer that.",
     "answerable": false
   },
   {
-    "id": "unan-02",
+    "id": "ood-02",
     "category": "unanswerable_out_of_domain",
     "question": "Who won the 2022 FIFA World Cup?",
     "ground_truth": "I don't have enough information to answer that.",
     "answerable": false
   },
   {
-    "id": "unan-03",
+    "id": "ood-03",
     "category": "unanswerable_out_of_domain",
     "question": "What is 17 multiplied by 23?",
     "ground_truth": "I don't have enough information to answer that.",

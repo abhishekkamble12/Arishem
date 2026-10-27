@@ -97,7 +97,12 @@ _ABSTAIN_PATTERNS = [
     re.compile(r"\b(does|do|did|is|are|was|were)\s*(not|n't)\s+(\w+\s+)?" + _DECLINE_VERBS + r"\b"),
     re.compile(r"\b(not|never)\s+" + _DECLINE_VERBS + r"\b"),
     re.compile(r"\bno\s+(information|mention|details|data|reference|indication|record)\b"),
-    re.compile(r"\b(not|n't)\s+(have|contain)\s+enough\b"),
+    # "don't" has no word boundary before "n't", so the contraction cannot sit
+    # behind a \b. This line used to miss "I don't have enough information" - the
+    # exact refusal the system prompt asks the model to give.
+    re.compile(r"(\bnot|n't)\s+(have|contain)\s+enough\b"),
+    re.compile(r"\b(do|does|did)\s*(not|n't)\s+have\s+(any\s+)?(relevant\s+|specific\s+)?"
+               r"(information|details|data|context|knowledge)\b"),
     re.compile(r"\bnot enough (relevant |)(information|context)\b"),
     re.compile(r"\b(cannot|can't|unable to|could not|couldn't)\s+(find|determine|answer|locate)\b"),
 ]

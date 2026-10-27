@@ -95,6 +95,12 @@ class AbstentionTests(unittest.TestCase):
             "There is no information about 401(k) matching.",
             "I couldn't find a probation period in the provided documents.",
             "The provided context doesn't contain enough information.",
+            # Verbatim from the evaluation run, where the first version missed them
+            # and counted correct refusals as hallucinations:
+            "I don't have enough information to answer that.",
+            "I do not have information on the retention period for Slack messages in the provided documents.",
+            "I do not have information in the provided documents about the retention period for customer support tickets.",
+            "I don’t have any relevant information about that.",
         ]:
             with self.subTest(answer=answer):
                 self.assertTrue(is_abstention(answer))

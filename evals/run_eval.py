@@ -212,6 +212,29 @@ def _is_rate_limit(exc: Exception) -> bool:
     return "rate_limit" in text or "ratelimit" in text or "429" in text or "tokens per day" in text
 
 
+def _cached_answer(cache: dict, item: dict) -> dict | None:
+    """
+    The cached answer for a golden item, but only if it was given to that question.
+
+    Answers are keyed by id. Two categories once produced the same ids, and the
+    report paired "Who won the 2022 World Cup?" with the answer to a question about
+    Slack retention. Checking the question text means a collision, or an edited
+    question, can never be reported against the wrong answer.
+    """
+    answer = cache["answers"].get(item["id"])
+    return answer if answer and answer.get("question") == item["question"] else None
+
+
+def validate_golden(golden: list[dict]) -> None:
+    """Fail before spending a token if the golden set is malformed."""
+    counts = {}
+    for item in golden:
+        counts[item["id"]] = counts.get(item["id"], 0) + 1
+    duplicates = sorted(k for k, v in counts.items() if v > 1)
+    if duplicates:
+        raise SystemExit(f"Golden set has duplicate ids, which would mix up answers: {duplicates}")
+
+
 # ── Generation ───────────────────────────────────────────────────────────────
 def generate(golden: list[dict], cache: dict) -> bool:
     """Answer every question not already cached. Returns False if stopped early."""
@@ -236,6 +259,9 @@ def generate(golden: list[dict], cache: dict) -> bool:
 
         # Ranked sources for the question as asked: the retrieval metrics' basis.
         ranked = vector_store().similarity_search(item["question"], k=TOP_K, filter=WORKSPACE_FILTER)
+        # A new answer invalidates every score given to the old one.
+        for judge_scores in cache["scores"].values():
+            judge_scores.pop(item["id"], None)
         answers[item["id"]] = {
             "question": item["question"],
             "answer": res.get("answer", ""),
@@ -274,7 +300,7 @@ def judge(golden: list[dict], cache: dict) -> bool:
     # 1.0. Unanswerable questions the system answered anyway ARE judged — that is
     # exactly where an invented answer would show up.
     pending = [g for g in golden
-               if g["id"] in cache["answers"]
+               if _cached_answer(cache, g)
                and not is_abstention(cache["answers"][g["id"]]["answer"], cache["answers"][g["id"]]["refused"])
                and any(m not in scores.get(g["id"], {}) for m in JUDGE_METRICS)]
     print(f"\nJudging with {JUDGE_MODEL}: {len(pending)} answers pending.")
@@ -319,7 +345,7 @@ def build_rows(golden: list[dict], cache: dict) -> list[dict]:
     scores = cache["scores"].get(JUDGE_MODEL, {})
     rows = []
     for g in golden:
-        a = cache["answers"].get(g["id"])
+        a = _cached_answer(cache, g)
         if not a:
             continue
         hit, rr, recall = retrieval_ranks(a["retrieved_sources"], g.get("relevant_sources"))
@@ -417,7 +443,10 @@ def render_report(rows: list[dict], config: dict) -> None:
         f"| Answered an unanswerable question | {_pct(abst['hallucinated'])} | unanswerable |",
         f"| Wrongly declined an answerable question | {_pct(abst['false_abstain'])} | answerable |",
         f"| Prompt injection resisted | {sum(1 for r in injection if not r['hijacked'])}/{len(injection)} | injection |",
-        f"| Latency, substantive answers | median {statistics.median(lat) / 1000:.1f} s, "
+        # Not production latency: the eval sends questions back to back with the model
+        # fallback disabled, so most of this is waiting out Groq's per-minute token
+        # limit. Production latency is measured separately (see the README).
+        f"| Latency in this run (rate-limit bound, not production) | median {statistics.median(lat) / 1000:.1f} s, "
         f"p95 {sorted(lat)[max(0, int(len(lat) * 0.95) - 1)] / 1000:.1f} s | |" if lat else "| Latency | n/a | |",
         f"| Tokens per question | mean {statistics.mean(tokens):,.0f} | |" if tokens else "| Tokens | n/a | |",
     ]
@@ -500,6 +529,8 @@ def render_report(rows: list[dict], config: dict) -> None:
         "Judged faithfulness is only as good as the judge; `evals/judge_control.py` checks it "
         "scores fabricated answers near 0 before its scores are trusted.",
         f"{len(rows)} questions is still small; differences of a few points between runs are noise.",
+        "Latency here is dominated by Groq's per-minute rate limit, because the questions run "
+        "back to back with the fallback model disabled. It is not production latency.",
     ]
     if config.get("incomplete"):
         caveats.insert(0, f"**This run is incomplete:** {config['incomplete']}")
@@ -535,6 +566,7 @@ async def main() -> None:
 
     with open(GOLDEN_FILE, encoding="utf-8") as fh:
         golden = json.load(fh)
+    validate_golden(golden)
     chunks, corpus_fp = load_corpus()
     print(f"Corpus: {len({c.metadata['source'] for c in chunks})} documents, {len(chunks)} chunks "
           f"(fingerprint {corpus_fp}). Golden set: {len(golden)} questions.")
@@ -545,10 +577,13 @@ async def main() -> None:
     cache = load_cache(fingerprint)
 
     incomplete = None
-    if not generate(golden, cache):
-        incomplete = "generation stopped at the daily token cap; rerun to finish."
-    elif not _flag("EVAL_SKIP_JUDGE") and not judge(golden, cache):
-        incomplete = "judging stopped at the daily token cap; rerun to finish."
+    generated = generate(golden, cache)
+    if not generated:
+        incomplete = "generation stopped at the generator's daily token cap; rerun to finish."
+    # The judge is a different model with its own daily budget, so the generator
+    # running out is no reason to stop judging the answers that already exist.
+    if not _flag("EVAL_SKIP_JUDGE") and not judge(golden, cache):
+        incomplete = (incomplete + " " if incomplete else "") +             "Judging stopped at the judge's daily token cap; rerun to finish."
 
     rows = build_rows(golden, cache)
     unscored = sum(1 for r in rows if not r["abstained"] and r.get("faithfulness") is None)
