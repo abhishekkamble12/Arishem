@@ -15,10 +15,15 @@ the AWS Pricing API on 2026-10-26. They are list prices, not a bill you have see
 | Public IPv4 address (in use) | $0.005/hr | **$3.65** |
 | S3 Standard, ~5 GiB of documents | $0.025/GB-mo | **$0.12** |
 | EBS snapshots, 7 daily, ~8–10 GB in use (estimate) | $0.05/GB-mo | **≈ $0.50** |
-| CloudFormation, IAM, Budgets, Parameter Store, Session Manager, DLM | — | **$0.00** |
-| | | **≈ $15.19/month** |
+| CloudWatch: 6 custom metrics, 7 alarm metrics, < 0.1 GB of logs (see below) | $0.30 / $0.10 / $0.67 per GB | **$0.00–2.57** |
+| CloudFormation, IAM, Budgets, Parameter Store, Session Manager, DLM, SNS email | — | **$0.00** |
+| | | **≈ $15.19–17.76/month** |
 
-The snapshot line is the only estimate: the $0.05/GB-month rate comes from the
+The CloudWatch line is a range because CloudWatch's always-free allowance (10 custom
+metrics, 10 alarms, 5 GB of logs a month) covers all of it on an account that uses
+nothing else; at list price it is 6 × $0.30 + 7 × $0.10 + about $0.07 of logs.
+
+The snapshot line is the only other estimate: the $0.05/GB-month rate comes from the
 Pricing API, but the GB is a guess at how much of the 30 GiB volume the OS, the
 Docker images and the data actually occupy. Snapshots are incremental and bill only
 for blocks in use.
@@ -100,6 +105,38 @@ docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs -f api
 cat /var/log/arishem-bootstrap.log     # what happened at first boot
 ```
+
+### Monitoring and alarms
+
+The API and worker send their stdout to the CloudWatch log group in the stack's
+`LogGroup` output, through Docker's `awslogs` driver. Metrics ride along in those
+logs as Embedded Metric Format lines (`backend/app/observability.py`), so there is
+no agent to install and nothing on the request path calls the CloudWatch API.
+
+| Alarm | Fires when | Why this signal |
+|---|---|---|
+| Query latency | p95 over 10 s in 2 of 3 five-minute periods | what users feel first |
+| Query error rate | over 5% of queries fail, in 2 of 3 periods with 10+ queries | at demo traffic, one failure in three queries would otherwise page you |
+| Ingestion stuck | a document has waited over 15 minutes | the age of the oldest item, not the queue length: a long queue that moves is load |
+| Worker heartbeat | no queue metrics for 10 minutes | the worker publishes every minute, so silence means it is down, while every API request still succeeds |
+| Host failure | EC2 system status check fails | **recovers** the instance onto new hardware: same volume, same IP |
+| Instance unresponsive | EC2 instance status check fails for 3 minutes | **reboots** it |
+
+All six email `AlertEmail` through an SNS topic. **AWS sends a subscription
+confirmation email after the first deploy; until you click it, alarms reach nobody.**
+
+```powershell
+# what the alarms see
+aws cloudwatch get-metric-statistics --namespace Arishem --metric-name QueryLatency `
+  --dimensions Name=Service,Value=api --extended-statistics p95 --period 300 `
+  --start-time (Get-Date).AddHours(-1).ToUniversalTime().ToString("o") `
+  --end-time (Get-Date).ToUniversalTime().ToString("o") --region ap-south-1
+aws cloudwatch describe-alarms --alarm-name-prefix arishem --region ap-south-1 `
+  --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
+```
+
+The alarms are validated (`cfn-lint` and `aws cloudformation validate-template`) but
+were added after the one live deployment, so none has fired on a real stack yet.
 
 ### Adding a domain
 
@@ -190,9 +227,9 @@ aws ec2 delete-snapshot --snapshot-id <id> --region ap-south-1   # once per id
   the top-k, which drifts with corpus size. Watch `confidence` and the `refused` flag
   in `PredictionLog` as a real corpus grows, and rerun `evals/run_eval.py` before
   moving the threshold.
-- **One instance is one point of failure, by design.** A reboot is downtime. AWS
-  restarts the instance on a host failure (`t4g.small` supports automatic
-  recovery), and the daily snapshots cover data loss, but there is no second box.
+- **One instance is one point of failure, by design.** A reboot is downtime. The
+  host-failure and instance-check alarms recover or reboot the instance on their
+  own, and the daily snapshots cover data loss, but there is no second box.
   Removing that means an Auto Scaling group behind a load balancer, with Postgres
   and Qdrant moved off the instance to managed services: roughly $30–60 a month
   more for a system with no users yet.

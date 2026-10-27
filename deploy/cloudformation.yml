@@ -51,7 +51,9 @@ Parameters:
   AlertEmail:
     Type: String
     AllowedPattern: ".+@.+\\..+"
-    Description: Where budget alerts go.
+    Description: >
+      Where budget and operational alarms go. Confirm the SNS subscription email
+      AWS sends after the first deploy, or the alarms have nobody to tell.
   RepoUrl:
     Type: String
     Default: https://github.com/abhishekkamble12/Arishem.git
@@ -131,6 +133,15 @@ Resources:
               - Effect: Allow
                 Action: [ssm:GetParameter, ssm:GetParameters]
                 Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/arishem/*"
+        - PolicyName: write-app-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Docker's awslogs driver writes container stdout here; metrics come
+              # from the EMF lines in it, so no cloudwatch:PutMetricData is needed.
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub "${AppLogGroup.Arn}:*"
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -234,6 +245,8 @@ Resources:
             PUBLIC_ORIGIN=${PublicOrigin}
             SECURE_SSL_REDIRECT=${SslRedirect}
             GOOGLE_CLIENT_ID=${GoogleClientId}
+            LOG_GROUP=${AppLogGroup}
+            AWS_REGION=${AWS::Region}
             ENVEOF
             chmod 600 /opt/arishem/.env
 
@@ -293,6 +306,143 @@ Resources:
             RetainRule:
               Count: !Ref BackupRetentionDays
 
+  # ── Logs, metrics and alarms ────────────────────────────────────────────────
+  # The API and worker log to CloudWatch through Docker's awslogs driver, and
+  # print metrics in Embedded Metric Format (backend/app/observability.py), which
+  # CloudWatch extracts from those logs. See docs/DEPLOY.md for what this costs.
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/arishem/${AWS::StackName}"
+      RetentionInDays: 14
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription: [{Protocol: email, Endpoint: !Ref AlertEmail}]
+
+  # Users feel this first. No traffic is not an outage, so missing data is fine.
+  QueryLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: p95 query latency over 10 s in 2 of the last 3 five-minute periods.
+      Namespace: Arishem
+      MetricName: QueryLatency
+      Dimensions: [{Name: Service, Value: api}]
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 10000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # QueryError is 0 or 1 per query, so its average is the error rate. The IF
+  # ignores five-minute windows with fewer than 10 queries: at demo traffic one
+  # failure in three queries is 33% and would page someone over nothing.
+  QueryErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Over 5% of queries failed in 2 of the last 3 five-minute periods (min. 10 queries).
+      Metrics:
+        - Id: rate
+          MetricStat:
+            Metric: {Namespace: Arishem, MetricName: QueryError, Dimensions: [{Name: Service, Value: api}]}
+            Period: 300
+            Stat: Average
+          ReturnData: false
+        - Id: n
+          MetricStat:
+            Metric: {Namespace: Arishem, MetricName: QueryError, Dimensions: [{Name: Service, Value: api}]}
+            Period: 300
+            Stat: SampleCount
+          ReturnData: false
+        - Id: gated
+          Expression: IF(n >= 10, rate, 0)
+          Label: Error rate (windows with 10+ queries)
+          ReturnData: true
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 0.05
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # The age of the oldest waiting document, not the count: a long queue that is
+  # moving is load, a short one that is not moving is a stuck worker.
+  IngestionStuckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A document has waited over 15 minutes to be ingested.
+      Namespace: Arishem
+      MetricName: OldestPendingSeconds
+      Dimensions: [{Name: Service, Value: worker}]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 900
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # The worker's beat schedule publishes queue metrics every minute. When they
+  # stop, the worker (or beat inside it) is down, and uploads queue forever
+  # without any request failing - so here, missing data is the alarm.
+  WorkerHeartbeatAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: No queue metrics from the worker for 10 minutes - worker or beat is down.
+      Namespace: Arishem
+      MetricName: IngestionInFlight
+      Dimensions: [{Name: Service, Value: worker}]
+      Statistic: SampleCount
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # One instance means no failover, so let EC2 repair what it can by itself:
+  # move the instance to healthy hardware (same volume, same Elastic IP) when the
+  # host fails, or reboot it when the OS stops responding.
+  HostRecoveryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: EC2 system status check failing - recovering the instance onto new hardware.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_System
+      Dimensions: [{Name: InstanceId, Value: !Ref Instance}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Sub "arn:${AWS::Partition}:automate:${AWS::Region}:ec2:recover"
+        - !Ref AlarmTopic
+
+  InstanceRebootAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: EC2 instance status check failing for 3 minutes - rebooting.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_Instance
+      Dimensions: [{Name: InstanceId, Value: !Ref Instance}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Sub "arn:${AWS::Partition}:automate:${AWS::Region}:ec2:reboot"
+        - !Ref AlarmTopic
+
   # ── Cost guardrail ──────────────────────────────────────────────────────────
   Budget:
     Type: AWS::Budgets::Budget
@@ -322,6 +472,9 @@ Outputs:
     Value: !Ref ElasticIP
   DocumentsBucketName:
     Value: !Ref DocumentsBucket
+  LogGroup:
+    Description: Container logs; also where the EMF metrics are parsed from.
+    Value: !Ref AppLogGroup
   ShellCommand:
     Description: Shell on the box without SSH or a key pair.
     Value: !Sub "aws ssm start-session --target ${Instance} --region ${AWS::Region}"
