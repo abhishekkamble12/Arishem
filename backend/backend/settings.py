@@ -10,6 +10,9 @@ from pathlib import Path
 
 from decouple import config
 
+# Running under `manage.py test` (or `coverage run manage.py test`).
+_TESTING = sys.argv[1:2] == ["test"]
+
 # Export Groq credentials
 _groq_key = config("GROQ_API_KEY", default=None)
 if _groq_key:
@@ -160,7 +163,11 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "cost_control": "100/min",
-        "auth": config("THROTTLE_RATE_AUTH", default="20/min"),
+        # Throttle counts live in the cache, which outlives each test, so under
+        # `manage.py test` the per-IP sign-up limit would trip on whichever test
+        # happens to make the 21st sign-in of the minute. The test of this
+        # throttle sets its own rate.
+        "auth": config("THROTTLE_RATE_AUTH", default="100000/min" if _TESTING else "20/min"),
     },
 }
 
@@ -214,6 +221,36 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+# Acknowledge a task when it finishes, not when it arrives. Acknowledged on
+# arrival, a task whose worker process was killed part-way (the OOM killer, on a
+# 2 GiB box, is the realistic case) was simply lost, and its file sat in
+# PROCESSING until the reconcile job below gave up on it. Now the worker's parent
+# process sees the child die and puts the message back on the queue. Tasks must
+# be idempotent for this, and run_ingestion_task is.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# Reserve one message at a time, so a crash hands back one task, not a batch.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# A replacement child process loads the embedding model before it reports ready
+# (backend/celery.py), which takes longer than Celery's 4 s default allowance. The
+# parent then killed every replacement as "not started", and a worker that had
+# lost one child to the OOM killer never recovered. Found by
+# loadtest/chaos_kill_worker.py.
+CELERY_WORKER_PROC_ALIVE_TIMEOUT = 120.0
+# A replacement child process loads the embedding model before it reports ready
+# (backend/celery.py), which takes longer than Celery's 4 s default allowance. The
+# parent then killed every replacement as "not started", and a worker that had
+# lost one child to the OOM killer never recovered. Found by
+# loadtest/chaos_kill_worker.py.
+CELERY_WORKER_PROC_ALIVE_TIMEOUT = 120.0
+# If the whole worker dies, not just a child process, Redis returns its
+# unacknowledged message after this long. It must exceed the longest task, or a
+# slow task would be handed to a second worker while the first still runs it.
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 3600}
+# Deliveries before a file is marked FAILED. Redelivery after a crash is what
+# makes the line above safe; this cap stops a document that crashes the worker
+# every time from being retried forever.
+MAX_INGESTION_ATTEMPTS = config("MAX_INGESTION_ATTEMPTS", default=3, cast=int)
 
 # Periodic jobs (run by `celery -A backend beat`)
 CELERY_BEAT_SCHEDULE = {
@@ -221,7 +258,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "app.tasks.reconcile_stuck_ingestions",
         "schedule": 600.0,  # every 10 minutes
     },
+    # Also the worker's heartbeat: an alarm fires when these metrics stop arriving.
+    "publish-queue-metrics": {
+        "task": "app.tasks.publish_queue_metrics",
+        "schedule": 60.0,
+    },
 }
+# Print CloudWatch Embedded Metric Format lines to stdout (app/observability.py).
+# On in docker-compose.prod.yml, where stdout goes to CloudWatch Logs.
+EMIT_METRICS = config("EMIT_METRICS", default=False, cast=bool)
 
 # Ingestion Queue Limits (Backpressure management)
 MAX_INGESTION_QUEUE_DEPTH = config("MAX_INGESTION_QUEUE_DEPTH", default=50, cast=int)
@@ -268,6 +313,19 @@ MAX_UPLOAD_MB = config("MAX_UPLOAD_MB", default=25, cast=int)
 # Per-user daily cap on /ai/query (each query can cost up to 4 LLM calls).
 # Counted from PredictionLog, so it survives restarts and works across workers.
 DAILY_QUERY_QUOTA = config("DAILY_QUERY_QUOTA", default=100, cast=int)
+# Shared allowance for one workspace's LLM-backed queries, on top of the per-user
+# throttle, so one busy team cannot use the capacity every tenant shares. Empty
+# disables it. Size it from loadtest/README.md: capacity divided by the number of
+# workspaces expected to be busy at once.
+WORKSPACE_QUERY_RATE = config("WORKSPACE_QUERY_RATE", default="120/min")
+# Documents one workspace may have queued or processing at once. The global
+# MAX_INGESTION_QUEUE_DEPTH protects the worker; this stops one tenant's bulk
+# upload taking every slot and turning everyone else's uploads into 503s.
+MAX_INGESTION_PER_WORKSPACE = config("MAX_INGESTION_PER_WORKSPACE", default=10, cast=int)
+# Seconds an answer stays cached; 0 disables the cache. See app/answer_cache.py.
+# Off under `manage.py test` unless a test turns it on: workspace ids repeat after
+# each test's rollback, so a cached answer could leak from one test into the next.
+ANSWER_CACHE_TTL_SECONDS = config("ANSWER_CACHE_TTL_SECONDS", default=0 if _TESTING else 86400, cast=int)
 
 # ── Cache (throttle counters) ─────────────────────────────────────────────────
 # Per-process memory by default; set CACHE_URL=redis://host:6379/2 so rate limits

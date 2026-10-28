@@ -42,6 +42,7 @@ from Services.Ai_service.load_data import SUPPORTED_EXTENSIONS as DOC_EXTENSIONS
 from Services.Ai_service.video_transcibing import SUPPORTED_MEDIA_EXTENSIONS
 from Services.storage import build_object_key, delete_object, is_key_in_workspace, save_upload
 
+from . import answer_cache
 from .metrics_service import get_workspace_monitoring_stats, log_prediction_and_check_drift
 from .models import (
     EDIT_ROLES,
@@ -63,7 +64,7 @@ from .serializers import (
     WorkspaceSerializer,
 )
 from .tasks import run_ingestion_task, run_youtube_ingestion_task
-from .throttling import AuthRateThrottle, CostControlRoleThrottle
+from .throttling import AuthRateThrottle, CostControlRoleThrottle, workspace_retry_after
 from .utils import resolve_workspace
 
 logger        = logging.getLogger(__name__)
@@ -322,7 +323,18 @@ def _run_ingestion(s3_key: str, user, workspace_id: int, original_filename: str 
         )
 
     # ── Backpressure Handling ─────────────────────────────────────────────────
-    from django.conf import settings
+    # Per workspace first, so one tenant's bulk upload cannot fill the shared
+    # queue and turn every other tenant's uploads into 503s. 429, not 503: the
+    # service is fine, this workspace has simply reached its share.
+    in_flight = IngestedFile.objects.filter(workspace=workspace, status__in=['PENDING', 'PROCESSING']).count()
+    if in_flight >= settings.MAX_INGESTION_PER_WORKSPACE:
+        return Response(
+            {"error": f"This workspace already has {in_flight} documents being processed "
+                      f"(limit {settings.MAX_INGESTION_PER_WORKSPACE}). Upload more once some finish."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": "30"},
+        )
+
     max_depth = getattr(settings, 'MAX_INGESTION_QUEUE_DEPTH', 50)
     active_jobs_count = IngestedFile.objects.filter(status__in=['PENDING', 'PROCESSING']).count()
     if active_jobs_count >= max_depth:
@@ -488,11 +500,39 @@ def query_vectordb(request):
             )
         kwargs["top_k"] = top_k
 
+    # A repeat of a question this workspace has already asked, against the same
+    # documents, comes from the cache: no retrieval, no LLM call, no quota used.
+    cache_key = None
+    if answer_cache.enabled():
+        lookup_started = time.time()
+        cached, cache_key = answer_cache.get(workspace_id, question, kwargs.get("top_k"))
+        if cached is not None:
+            result = {**cached, "cached": True,
+                      "usage": {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "models": []}}
+            log_prediction_and_check_drift(
+                workspace_id=workspace_id, user=request.user, question=question, result=result,
+                response_time_ms=int((time.time() - lookup_started) * 1000), cache_hit=True,
+            )
+            return Response(result, status=status.HTTP_200_OK)
+
+    # The workspace's shared allowance, after the cache (a hit costs nothing) and
+    # after resolve_workspace (so nobody can spend another tenant's allowance).
+    retry_after = workspace_retry_after(workspace_id)
+    if retry_after:
+        return Response(
+            {"error": "This workspace is asking questions faster than its shared limit allows. "
+                      f"Try again in {retry_after} s."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # Daily per-user cap on LLM-backed queries. No role is exempt: every sign-up is
     # admin of their own workspace, so an exemption would be an open cost hole.
     user_role = request.user.role_in(workspace_id)
     day_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    used_today = PredictionLog.objects.filter(user=request.user, timestamp__gte=day_start).count()
+    used_today = PredictionLog.objects.filter(
+        user=request.user, timestamp__gte=day_start, cache_hit=False
+    ).count()
     if used_today >= settings.DAILY_QUERY_QUOTA:
         return Response(
             {"error": f"Daily query limit reached ({settings.DAILY_QUERY_QUOTA}). Try again tomorrow."},
@@ -530,6 +570,9 @@ def query_vectordb(request):
     if error_msg:
         return Response({"error": f"Query failed: {error_msg}"}, status=status.HTTP_502_BAD_GATEWAY)
 
+    if cache_key:
+        answer_cache.put(cache_key, result)
+    result["cached"] = False
     return Response(result, status=status.HTTP_200_OK)
 
 
@@ -611,6 +654,7 @@ def delete_file(request):
     delete_object(file_obj.object_key)
     name = file_obj.original_filename or file_obj.object_key
     file_obj.delete()
+    answer_cache.bump_corpus_version(file_obj.workspace_id)
     return Response({"message": f"'{name}' removed successfully"}, status=status.HTTP_200_OK)
 
 
