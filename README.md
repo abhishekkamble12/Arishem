@@ -25,7 +25,7 @@ measured, and this README does not claim it.
 | Unanswerable questions declined | **8 of 8** measured so far, with **0** invented answers; 1 of 53 answerable questions wrongly declined |
 | Prompt injection | **2 of 2** resisted: a document instructing the model to misreport expense limits did not change the answer |
 | Deployed and tested on AWS | **32/32 checks** over the network on a live stack — health, sign-up, per-workspace roles, S3 upload and ingestion, cited answers, refusal, cross-tenant isolation, token accounting, deletion — then torn down. [docs/DEPLOYMENT_VERIFICATION.md](docs/DEPLOYMENT_VERIFICATION.md) |
-| Tests | **136** backend tests and **28** for the evaluation's own scoring rules and golden set, all offline, all in CI |
+| Tests | **158** backend tests and **28** for the evaluation's own scoring rules and golden set, all offline, all in CI |
 | Query latency | **median 2.46 s, worst 5.37 s** over six queries in the production container, measured while Groq was rate-limiting the primary model; ~2.1 s of it is the three Groq calls |
 | Tokens per answered query | **1,041 in + 449 out** on the deployed system |
 | Deployment cost | **~\$14.69/month** on AWS, from live Pricing API rates — see [docs/DEPLOY.md](docs/DEPLOY.md) |
@@ -284,9 +284,9 @@ cd backend
 python manage.py test --settings=backend.test_settings
 ```
 
-136 backend tests, all offline: the vector store, LLM, S3, Whisper and yt-dlp are
+158 backend tests, all offline: the vector store, LLM, S3, Whisper and yt-dlp are
 replaced with fakes, so no test needs a network call or an API key. CI runs them with
-coverage on every push: 76% of `app/` and `Services/`, test files and migrations
+coverage on every push: 77% of `app/` and `Services/`, test files and migrations
 excluded. (An earlier version of this README said 79% from a measurement that counted
 the test files themselves; measured correctly it was 68%, before the Meetings feature
 had tests.) They cover:
