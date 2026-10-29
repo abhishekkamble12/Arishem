@@ -1,0 +1,107 @@
+# Load-test stack: the production API and worker commands, production memory
+# limits, local file storage instead of S3, and fake_groq.py in place of Groq.
+# Nothing here is used in production. See loadtest/README.md.
+#
+#   docker compose -f loadtest/docker-compose.loadtest.yml up -d --build
+#   bash loadtest/run.sh baseline 1 2 4 8 16 32
+#
+# API_WORKER_ARGS chooses the gunicorn worker model, so the same stack can measure
+# the production setting and an alternative without editing any file.
+
+name: arishem-loadtest
+
+x-app: &app
+  build: ../backend
+  restart: unless-stopped
+  volumes: [localstore:/home/arishem/app/local_storage]
+  environment: &app-env
+    SECRET_KEY: loadtest-only-not-a-secret
+    DEBUG: "False"
+    SECURE_SSL_REDIRECT: "False"
+    ALLOWED_HOSTS: api,localhost,127.0.0.1
+    DATABASE_URL: postgres://arishem:arishem@postgres:5432/arishem
+    QDRANT_URL: http://qdrant:6333
+    QDRANT_COLLECTION: documents
+    STORAGE_BACKEND: local
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    CACHE_URL: redis://redis:6379/2
+    GROQ_API_KEY: loadtest-not-a-key
+    GROQ_API_BASE: http://fake-groq:8080
+    # One test user sends every request, so the per-user limits that protect a
+    # real deployment's LLM budget would only measure themselves.
+    THROTTLE_RATE_ADMIN: 1000000/min
+    THROTTLE_RATE_AUTH: 1000/min
+    DAILY_QUERY_QUOTA: "100000000"
+    # The test repeats 53 questions, so the answer cache would serve most of them
+    # and report the cache's speed as the system's capacity. The workspace limit
+    # would reject the one test workspace. Both off unless a run turns them on.
+    ANSWER_CACHE_TTL_SECONDS: ${ANSWER_CACHE_TTL_SECONDS:-0}
+    WORKSPACE_QUERY_RATE: ${WORKSPACE_QUERY_RATE:-}
+  depends_on: &app-deps
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    qdrant: {condition: service_started}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: arishem, POSTGRES_PASSWORD: arishem, POSTGRES_DB: arishem}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U arishem"], interval: 5s, retries: 10}
+    deploy: {resources: {limits: {memory: 320M}}}
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 64mb --maxmemory-policy noeviction --save ""
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10}
+    deploy: {resources: {limits: {memory: 96M}}}
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    deploy: {resources: {limits: {memory: 640M}}}
+
+  fake-groq:
+    image: python:3.12-slim
+    command: python /srv/fake_groq.py
+    volumes: ["./fake_groq.py:/srv/fake_groq.py:ro"]
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: python manage.py migrate --noinput
+
+  api:
+    <<: *app
+    # 18000, not 8000, so it can run beside the development stack. Only the
+    # failure demo uses it; Locust reaches the API over the compose network.
+    ports: ["18000:8000"]
+    command: >
+      gunicorn backend.wsgi:application --config gunicorn.conf.py --bind 0.0.0.0:8000
+      ${API_WORKER_ARGS:---workers 2} --timeout 120 --error-logfile -
+    depends_on:
+      <<: *app-deps
+      migrate: {condition: service_completed_successfully}
+      fake-groq: {condition: service_started}
+    # A t4g.small has 2 vCPUs and 2 GiB in total. The API gets both CPUs here,
+    # which is generous: on the instance it shares them with everything else.
+    deploy: {resources: {limits: {cpus: "2", memory: 1200M}}}
+
+  worker:
+    <<: *app
+    command: celery -A backend worker --beat --schedule /tmp/celerybeat-schedule --concurrency 1 --loglevel=info
+    depends_on:
+      <<: *app-deps
+      migrate: {condition: service_completed_successfully}
+
+  locust:
+    image: locustio/locust:2.32.4
+    profiles: [tools]
+    volumes:
+      - ./:/mnt/locust
+      - ../pcaps:/mnt/pcaps:ro
+      - ../evals:/mnt/evals:ro
+    working_dir: /mnt/locust
+    depends_on: [api]
+
+volumes:
+  localstore:

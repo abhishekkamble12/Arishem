@@ -54,3 +54,13 @@ htmlcov/
 evals/.eval_cache.json
 evals/.eval_cache.json.tmp
 evals/answers_cache.json
+
+# retrieval benchmark: BEIR SciFact, downloaded on first run
+evals/.data/
+
+# load test: keep each level's summary CSV as evidence, not Locust's
+# per-second history or empty failure/exception files
+loadtest/results/*_stats_history.csv
+loadtest/results/*_failures.csv
+loadtest/results/*_exceptions.csv
+loadtest/results/chaos_*.txt

@@ -35,6 +35,9 @@ RUN mkdir -p local_storage
 RUN SECRET_KEY=build-time-placeholder DEBUG=False python manage.py collectstatic --noinput
 
 EXPOSE 8000
+# Threads, not just processes: a query spends most of its ~3 s waiting on the LLM,
+# and a sync worker waits with it. Load-tested in loadtest/README.md: 2 sync
+# workers plateaued at 0.69 queries/s; 2 workers x 8 threads reached 5.4.
 CMD ["gunicorn", "backend.wsgi:application", "--config", "gunicorn.conf.py", \
-     "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", \
-     "--access-logfile", "-", "--error-logfile", "-"]
+     "--bind", "0.0.0.0:8000", "--workers", "2", "--worker-class", "gthread", "--threads", "8", \
+     "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
