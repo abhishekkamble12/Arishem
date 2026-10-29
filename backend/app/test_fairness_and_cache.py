@@ -8,13 +8,13 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from langchain_core.documents import Document
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from . import answer_cache
 from .models import IngestedFile, PredictionLog, User, Workspace
-from rest_framework_simplejwt.tokens import RefreshToken
-
 from .tasks import run_ingestion_task
 from .tests import _make_user
+
 
 def _register(_client, email):
     """
