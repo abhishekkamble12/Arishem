@@ -35,6 +35,17 @@ x-app: &app
     # at import — an empty value here would stop the container from starting.
     LLM_INPUT_COST_PER_MTOK: ${LLM_INPUT_COST_PER_MTOK:-0}
     LLM_OUTPUT_COST_PER_MTOK: ${LLM_OUTPUT_COST_PER_MTOK:-0}
+    # Metrics as JSON lines on stdout, which the logging driver below sends to
+    # CloudWatch; the alarms in deploy/cloudformation.yml read them.
+    EMIT_METRICS: "True"
+  # Container stdout to CloudWatch Logs. The driver runs in the Docker daemon on
+  # the host and uses the instance role, so no credentials live in any container.
+  logging:
+    driver: awslogs
+    options:
+      awslogs-group: ${LOG_GROUP:?Set LOG_GROUP}
+      awslogs-region: ${AWS_REGION:-ap-south-1}
+      tag: "{{.Name}}"
   depends_on: &app-deps
     postgres: {condition: service_healthy}
     redis: {condition: service_healthy}
@@ -80,10 +91,14 @@ services:
 
   api:
     <<: *app
-    # 2 workers is what a 2 GiB box holds once each has loaded the embedding model.
+    # 2 processes is what a 2 GiB box holds once each has loaded the embedding
+    # model; 8 threads each, because a query mostly waits on the LLM and threads
+    # share their process's model. Measured in loadtest/README.md: 0.69 queries/s
+    # with 2 sync workers, 5.4 with these settings, for ~140 MiB more memory.
     command: >
       gunicorn backend.wsgi:application --config gunicorn.conf.py --bind 0.0.0.0:8000
-      --workers 2 --timeout 120 --access-logfile - --error-logfile -
+      --workers 2 --worker-class gthread --threads 8 --timeout 120
+      --access-logfile - --error-logfile -
     depends_on:
       <<: *app-deps
       migrate: {condition: service_completed_successfully}
